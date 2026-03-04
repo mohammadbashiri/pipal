@@ -27,6 +27,15 @@ def ensure_agent_scaffold(agent_path: str, name: str = "assistant"):
                 content = content.replace("{name}", name)
                 content = content.replace("{agent_path}", str(p.resolve()))
                 fp.write_text(content, encoding="utf-8")
+        elif item.is_dir() and item.name in DEFAULT_DIRS:
+            for sub in item.iterdir():
+                if sub.name.endswith(".md"):
+                    fp = p / item.name / sub.name
+                    if not fp.exists():
+                        content = sub.read_text(encoding="utf-8")
+                        content = content.replace("{name}", name)
+                        content = content.replace("{agent_path}", str(p.resolve()))
+                        fp.write_text(content, encoding="utf-8")
 
 def write_llm_json(agent_path: str, provider: str, model: str):
     p = Path(agent_path) / "llm.json"
