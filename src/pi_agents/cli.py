@@ -5,6 +5,7 @@ from rich.prompt import Confirm
 from .registry import add_agent, rm_agent, list_agents, get_agent
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
+from .runner import run_agent
 
 
 def build_parser():
@@ -34,14 +35,15 @@ def build_parser():
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
 
-    # Agent mode (passthrough prompt)
+    # Agent mode (passthrough to pi with persona context)
     if "--agent" in argv:
         i = argv.index("--agent")
         if i + 1 >= len(argv):
             print("[red]Missing agent name after --agent[/red]")
             return 2
         name = argv[i + 1]
-        prompt = " ".join(argv[i + 2:]).strip()
+        # Everything except --agent <name> passes through to pi
+        extra_args = argv[:i] + argv[i + 2:]
 
         a = get_agent(name)
         if not a:
@@ -49,15 +51,14 @@ def main(argv=None):
             return 2
 
         llm = load_llm_config(a["path"])
-        print(f"[cyan]Agent[/cyan] {a['name']} → {a['path']}")
-        if llm:
-            print(f"[cyan]LLM[/cyan] provider={llm.get('provider')} model={llm.get('model')} endpoint={llm.get('endpoint')}")
-        else:
-            print("[yellow]No llm.json found in agent folder[/yellow]")
+        if not llm:
+            print("[yellow]No llm.json found. Run:[/yellow]")
+            print(f'  pi agent set-llm {name} "provider:model"')
+            return 2
 
-        if prompt:
-            print(f"[cyan]Prompt[/cyan] {prompt}")
-        return 0
+        # Hand off to pi with persona injected
+        run_agent(a["path"], llm, extra_args)
+        return 0  # unreachable after execvp, but keeps linters happy
 
     args = build_parser().parse_args(argv)
 
