@@ -1,0 +1,19 @@
+[project]
+name = "pi-agents"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Mo Bashiri", email = "mohammad.bashiri@noselab.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "rich>=14.3.3",
+]
+
+[project.scripts]
+pi = "pi_agents.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.16,<0.10.0"]
+build-backend = "uv_build"
