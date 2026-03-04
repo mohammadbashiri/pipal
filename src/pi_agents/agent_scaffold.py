@@ -2,7 +2,7 @@ import json
 import importlib.resources
 from pathlib import Path
 
-DEFAULT_DIRS = ["skills", "tools", "routines", "runs"]
+DEFAULT_DIRS = ["skills", "tools", "routines", "sessions"]
 
 TEMPLATE_PKG = "pi_agents.templates.default"
 
