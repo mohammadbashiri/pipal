@@ -1,7 +1,7 @@
 import argparse, shutil, sys
 from pathlib import Path
 from rich import print
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from .registry import add_agent, rm_agent, list_agents, get_agent
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
@@ -79,7 +79,7 @@ def main(argv=None):
 
             print(f"[green]Ensured directory[/green] {path}")
 
-            ensure_agent_scaffold(path)
+            ensure_agent_scaffold(path, name=args.name)
 
             print(f"[dim]Set model with:[/dim]")
             print(f"[dim]pi agent set-llm {args.name} \"provider:model\"[/dim]")
@@ -113,7 +113,7 @@ def main(argv=None):
                 print(f"[red]Unknown agent[/red] {args.name}. Run: pi agent ls")
                 return 2
 
-            ensure_agent_scaffold(a["path"])
+            ensure_agent_scaffold(a["path"], name=args.name)
 
             provider = args.provider
             model = args.model

@@ -45,8 +45,6 @@ def load_persona(agent_path: str) -> str:
 
 def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     """Invoke pi with persona context, passing through any extra CLI args."""
-    system_prompt = load_persona(agent_path)
-
     cmd = ["pi"]
 
     provider = llm_config.get("provider")
@@ -56,8 +54,14 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     if model:
         cmd += ["--model", model]
 
-    if system_prompt:
-        cmd += ["--system-prompt", system_prompt]
+    # Inject persona files via @file syntax
+    agent = Path(agent_path)
+    for fname in PERSONA_FILES:
+        fp = agent / fname
+        if fp.exists():
+            content = fp.read_text(encoding="utf-8").strip()
+            if content:
+                cmd.append(f"@{fp.resolve()}")
 
     # Pass through all remaining user args (prompts, flags, etc.)
     cmd += extra_args
