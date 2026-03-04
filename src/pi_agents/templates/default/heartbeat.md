@@ -1,7 +1,12 @@
 # Heartbeat
 
-At the start of each session, quickly check:
+This is an automated heartbeat check. You are not talking to the user.
 
+Quickly check:
 - Scan the `routines/` folder for any tasks that are due
 - Review `memory.md` for pending reminders or follow-ups
-- If nothing needs attention, skip this and move on to the user's request
+
+If something needs attention, describe it briefly.
+If nothing needs attention, reply with exactly: HEARTBEAT_OK
+
+Do not introduce yourself. Do not ask questions. Do not chat.

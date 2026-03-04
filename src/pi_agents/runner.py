@@ -61,8 +61,10 @@ def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
 
 def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     """Invoke pi with persona context, passing through any extra CLI args."""
-    # Extract our --session <name> before passing to pi
+    # Extract our flags before passing to pi
     session_name, extra_args = _extract_session_name(extra_args)
+    heartbeat_only = "--heartbeat-only" in extra_args
+    extra_args = [a for a in extra_args if a != "--heartbeat-only"]
 
     cmd = ["pi"]
 
@@ -85,7 +87,8 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         cmd.append("-c")
 
     # Inject persona files via @file syntax
-    for fname in PERSONA_FILES:
+    files_to_inject = ["heartbeat.md"] if heartbeat_only else PERSONA_FILES
+    for fname in files_to_inject:
         fp = agent / fname
         if fp.exists():
             content = fp.read_text(encoding="utf-8").strip()
