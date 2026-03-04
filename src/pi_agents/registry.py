@@ -60,11 +60,13 @@ def add_agent(name, path):
 
 def rm_agent(name):
     reg = load_registry()
-    if name in reg.get("agents", {}):
-        del reg["agents"][name]
-        save_registry(reg)
-        return True
-    return False
+    entry = reg.get("agents", {}).get(name)
+    if entry is None:
+        return None
+    path = _entry_to_path(entry)
+    del reg["agents"][name]
+    save_registry(reg)
+    return path
 
 def list_agents():
     reg = load_registry()
