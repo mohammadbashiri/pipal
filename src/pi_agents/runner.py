@@ -54,8 +54,13 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     if model:
         cmd += ["--model", model]
 
-    # Inject persona files via @file syntax
+    # Store sessions per agent
     agent = Path(agent_path)
+    sessions_dir = agent / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    cmd += ["--session-dir", str(sessions_dir.resolve())]
+
+    # Inject persona files via @file syntax
     for fname in PERSONA_FILES:
         fp = agent / fname
         if fp.exists():
