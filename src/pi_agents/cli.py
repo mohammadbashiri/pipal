@@ -1,6 +1,7 @@
-import argparse, sys
+import argparse, shutil, sys
 from pathlib import Path
 from rich import print
+from rich.prompt import Confirm
 from .registry import add_agent, rm_agent, list_agents, get_agent
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
@@ -62,8 +63,8 @@ def main(argv=None):
 
     if args.cmd == "agent":
         if args.agent_cmd == "add":
-            path = args.path or f"./{args.name}"
-            path = str(Path(path).expanduser().resolve())
+            base = args.path or "."
+            path = str((Path(base) / args.name).expanduser().resolve())
             Path(path).mkdir(parents=True, exist_ok=True)
 
             res = add_agent(args.name, path)  # should auto-create registry
@@ -86,8 +87,14 @@ def main(argv=None):
             return 0
 
         if args.agent_cmd == "rm":
-            ok = rm_agent(args.name)
-            print("[green]OK[/green] removed" if ok else "[yellow]Not found[/yellow]")
+            path = rm_agent(args.name)
+            if path is None:
+                print("[yellow]Not found[/yellow]")
+                return 0
+            print(f"[green]OK[/green] unregistered {args.name}")
+            if Path(path).exists() and Confirm.ask(f"Also delete agent directory {path}?", default=False):
+                shutil.rmtree(path)
+                print(f"[green]Deleted[/green] {path}")
             return 0
 
         if args.agent_cmd == "ls":
