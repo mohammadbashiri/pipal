@@ -6,6 +6,7 @@ from .registry import add_agent, rm_agent, list_agents, get_agent
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent
+from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
 
 
 def build_parser():
@@ -30,13 +31,34 @@ def build_parser():
     p_set.add_argument("--provider", default=None)
     p_set.add_argument("--model", default=None)
 
+    # ── daemon subcommands ──
+    pd = sub.add_parser("daemon", help="Manage agent daemon")
+    dsub = pd.add_subparsers(dest="daemon_cmd")
+
+    pd_start = dsub.add_parser("start", help="Start heartbeat daemon")
+    pd_start.add_argument("--agent", required=True, help="Agent name")
+    pd_start.add_argument("--every", required=True, help='Interval, e.g. "30m", "1h"')
+
+    pd_stop = dsub.add_parser("stop", help="Stop heartbeat daemon")
+    pd_stop.add_argument("--agent", required=True, help="Agent name")
+
+    pd_status = dsub.add_parser("status", help="Check daemon status")
+    pd_status.add_argument("--agent", required=True, help="Agent name")
+
+    pd_logs = dsub.add_parser("logs", help="Show daemon logs")
+    pd_logs.add_argument("--agent", required=True, help="Agent name")
+    pd_logs.add_argument("-n", type=int, default=50, help="Number of lines (default: 50)")
+
     return p
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
 
     # Agent mode (passthrough to pi with persona context)
-    if "--agent" in argv:
+    # Only trigger if --agent is used outside a known subcommand
+    known_subcmds = {"agent", "daemon"}
+    first_arg = argv[0] if argv else None
+    if "--agent" in argv and first_arg not in known_subcmds:
         i = argv.index("--agent")
         if i + 1 >= len(argv):
             print("[red]Missing agent name after --agent[/red]")
@@ -136,6 +158,76 @@ def main(argv=None):
             written = write_llm_json(a["path"], provider, model)
             print(f"[green]Updated[/green] {written}")
             print(f"[cyan]LLM[/cyan] provider={provider} model={model}")
+            return 0
+
+    if args.cmd == "daemon":
+        if args.daemon_cmd == "start":
+            a = get_agent(args.agent)
+            if not a:
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                return 2
+            try:
+                interval = parse_interval(args.every)
+            except ValueError as e:
+                print(f"[red]{e}[/red]")
+                return 2
+            try:
+                pid = start_daemon(args.agent, a["path"], interval)
+            except RuntimeError as e:
+                print(f"[yellow]{e}[/yellow]")
+                return 1
+            except FileNotFoundError as e:
+                print(f"[red]{e}[/red]")
+                return 2
+            print(f"[green]Daemon started[/green] for [bold]{args.agent}[/bold]")
+            print(f"  PID:      {pid}")
+            print(f"  interval: {format_interval(interval)}")
+            print(f"  log:      {Path(a['path']) / 'daemon.log'}")
+            return 0
+
+        if args.daemon_cmd == "stop":
+            a = get_agent(args.agent)
+            if not a:
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                return 2
+            if stop_daemon(a["path"]):
+                print(f"[green]Stopped[/green] daemon for [bold]{args.agent}[/bold]")
+            else:
+                print(f"[yellow]No daemon running for[/yellow] {args.agent}")
+            return 0
+
+        if args.daemon_cmd == "status":
+            a = get_agent(args.agent)
+            if not a:
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                return 2
+            st = daemon_status(a["path"])
+            if not st:
+                print(f"{args.agent} daemon: [yellow]stopped[/yellow]")
+                return 0
+            print(f"{args.agent} daemon: [green]running[/green]")
+            print(f"  PID:            {st['pid']}")
+            if st.get('started_at'):
+                print(f"  uptime:         {format_uptime(st['started_at'])}")
+            if st.get('interval'):
+                print(f"  interval:       {format_interval(st['interval'])}")
+            if st.get('last_heartbeat'):
+                print(f"  last heartbeat: {st['last_heartbeat']}")
+            else:
+                print(f"  last heartbeat: (none yet)")
+            print(f"  log:            {st['log']}")
+            return 0
+
+        if args.daemon_cmd == "logs":
+            a = get_agent(args.agent)
+            if not a:
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                return 2
+            output = daemon_logs(a["path"], lines=args.n)
+            if output:
+                print(output)
+            else:
+                print("[yellow]No logs yet[/yellow]")
             return 0
 
     print("[yellow]Tip:[/yellow] use `pi agent add|ls|rm` or `pi --agent <name> \"...\"`")
