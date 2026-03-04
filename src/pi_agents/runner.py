@@ -10,6 +10,7 @@ PERSONA_FILES = [
     "strategy.md",
     "memory.md",
     "reflection.md",
+    "heartbeat.md",
 ]
 
 
