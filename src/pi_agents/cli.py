@@ -93,9 +93,11 @@ def main(argv=None):
                 print("[yellow]Not found[/yellow]")
                 return 0
             print(f"[green]OK[/green] unregistered {args.name}")
-            if Path(path).exists() and Confirm.ask(f"Also delete agent directory {path}?", default=False):
-                shutil.rmtree(path)
-                print(f"[green]Deleted[/green] {path}")
+            if Path(path).exists():
+                answer = input(f"Also delete agent directory {path}? [y/N] ").strip().lower()
+                if answer in ("y", "yes"):
+                    shutil.rmtree(path)
+                    print(f"[green]Deleted[/green] {path}")
             return 0
 
         if args.agent_cmd == "ls":
