@@ -43,8 +43,26 @@ def load_persona(agent_path: str) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
+    """Extract --session <name> from args. Returns (session_name, remaining_args)."""
+    remaining = []
+    session_name = "main"
+    i = 0
+    while i < len(args):
+        if args[i] == "--session" and i + 1 < len(args):
+            session_name = args[i + 1]
+            i += 2
+        else:
+            remaining.append(args[i])
+            i += 1
+    return session_name, remaining
+
+
 def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     """Invoke pi with persona context, passing through any extra CLI args."""
+    # Extract our --session <name> before passing to pi
+    session_name, extra_args = _extract_session_name(extra_args)
+
     cmd = ["pi"]
 
     provider = llm_config.get("provider")
@@ -54,11 +72,16 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     if model:
         cmd += ["--model", model]
 
-    # Store sessions per agent
+    # Named session file per agent
     agent = Path(agent_path)
     sessions_dir = agent / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
-    cmd += ["--session-dir", str(sessions_dir.resolve())]
+    session_file = sessions_dir / f"{session_name}.jsonl"
+    cmd += ["--session", str(session_file.resolve())]
+
+    # Continue if session already exists
+    if session_file.exists():
+        cmd.append("-c")
 
     # Inject persona files via @file syntax
     for fname in PERSONA_FILES:
