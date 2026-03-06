@@ -110,6 +110,10 @@ def main(argv=None):
             return 0
 
         if args.agent_cmd == "rm":
+            a = get_agent(args.name)
+            if a and stop_daemon(a["path"]):
+                print(f"[green]Stopped[/green] daemon for [bold]{args.name}[/bold]")
+
             path = rm_agent(args.name)
             if path is None:
                 print("[yellow]Not found[/yellow]")
