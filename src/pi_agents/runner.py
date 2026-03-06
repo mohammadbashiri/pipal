@@ -64,7 +64,10 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     # Extract our flags before passing to pi
     session_name, extra_args = _extract_session_name(extra_args)
     heartbeat_only = "--heartbeat-only" in extra_args
-    extra_args = [a for a in extra_args if a != "--heartbeat-only"]
+    no_session = "--no-session" in extra_args
+    extra_args = [a for a in extra_args if a not in {"--heartbeat-only", "--no-session"}]
+    if heartbeat_only:
+        no_session = True
 
     cmd = ["pi"]
 
@@ -75,16 +78,19 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     if model:
         cmd += ["--model", model]
 
-    # Named session file per agent
     agent = Path(agent_path)
-    sessions_dir = agent / "sessions"
-    sessions_dir.mkdir(parents=True, exist_ok=True)
-    session_file = sessions_dir / f"{session_name}.jsonl"
-    cmd += ["--session", str(session_file.resolve())]
+    if no_session:
+        cmd.append("--no-session")
+    else:
+        # Named session file per agent
+        sessions_dir = agent / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        session_file = sessions_dir / f"{session_name}.jsonl"
+        cmd += ["--session", str(session_file.resolve())]
 
-    # Continue if session already exists
-    if session_file.exists():
-        cmd.append("-c")
+        # Continue if session already exists
+        if session_file.exists():
+            cmd.append("-c")
 
     # Inject persona files via @file syntax
     files_to_inject = ["heartbeat.md"] if heartbeat_only else PERSONA_FILES

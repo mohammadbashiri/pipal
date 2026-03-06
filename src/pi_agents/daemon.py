@@ -140,7 +140,7 @@ def _run_loop(
                     uv_bin, "run", "pi",
                     "--agent", agent_name,
                     "--heartbeat-only",
-                    "--session", "heartbeat",
+                    "--no-session",
                     "--print",
                     "Run your heartbeat checklist.",
                 ],
