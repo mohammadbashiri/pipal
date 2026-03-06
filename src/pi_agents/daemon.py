@@ -58,6 +58,27 @@ def _routine_files(agent_path: str) -> list[Path]:
     return sorted(p for p in routines.glob("*.md") if p.is_file())
 
 
+def _daemon_guard(agent_path: str, current_pid: int) -> tuple[bool, str]:
+    """Return (ok, reason). Daemon should stop when guard fails."""
+    agent_dir = Path(agent_path)
+    if not agent_dir.exists():
+        return False, "agent path no longer exists"
+
+    pid_file = _pid_path(agent_path)
+    if not pid_file.exists():
+        return False, "pid file missing"
+
+    try:
+        pid = int(pid_file.read_text().strip())
+    except ValueError:
+        return False, "pid file is invalid"
+
+    if pid != current_pid:
+        return False, f"pid mismatch (expected {current_pid}, found {pid})"
+
+    return True, ""
+
+
 def parse_interval(s: str) -> int:
     """Parse '30m', '1h', '2h30m', '90s' into seconds."""
     s = s.strip().lower()
@@ -139,6 +160,15 @@ def _run_loop(
 
     while True:
         try:
+            ok, reason = _daemon_guard(agent_path, os.getpid())
+            if not ok:
+                print(
+                    f"[{datetime.now().isoformat()}] Daemon stopping: {reason}",
+                    flush=True,
+                )
+                _meta_path(agent_path).unlink(missing_ok=True)
+                break
+
             now = datetime.now().isoformat()
             print(f"\n[{now}] Heartbeat tick", flush=True)
             routines = _routine_files(agent_path)
