@@ -51,6 +51,13 @@ def _find_project_root() -> Path:
     raise FileNotFoundError("Could not find pyproject.toml")
 
 
+def _routine_files(agent_path: str) -> list[Path]:
+    routines = Path(agent_path) / "routines"
+    if not routines.exists():
+        return []
+    return sorted(p for p in routines.glob("*.md") if p.is_file())
+
+
 def parse_interval(s: str) -> int:
     """Parse '30m', '1h', '2h30m', '90s' into seconds."""
     s = s.strip().lower()
@@ -134,31 +141,45 @@ def _run_loop(
         try:
             now = datetime.now().isoformat()
             print(f"\n[{now}] Heartbeat tick", flush=True)
+            routines = _routine_files(agent_path)
+            if not routines:
+                print("HEARTBEAT_OK (no routines found)", flush=True)
+            else:
+                for routine in routines:
+                    print(f"Running routine: {routine.name}", flush=True)
+                    try:
+                        result = subprocess.run(
+                            [
+                                uv_bin, "run", "pi",
+                                "--agent", agent_name,
+                                "--routine-only",
+                                "--no-session",
+                                "--print",
+                                f"@{routine.resolve()}",
+                                "Execute only the attached routine file. "
+                                "Use tools/files as needed to complete it. "
+                                "Reply in exactly one line: "
+                                "ROUTINE_OK <brief report> or ROUTINE_FAIL <brief reason>.",
+                            ],
+                            cwd=project_root,
+                            capture_output=True,
+                            text=True,
+                            timeout=300,  # 5 min max per routine
+                        )
 
-            result = subprocess.run(
-                [
-                    uv_bin, "run", "pi",
-                    "--agent", agent_name,
-                    "--heartbeat-only",
-                    "--no-session",
-                    "--print",
-                    "Run your heartbeat checklist.",
-                ],
-                cwd=project_root,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 min max per tick
-            )
+                        output = (result.stdout or "").strip()
+                        if output:
+                            print(output, flush=True)
+                        else:
+                            print("ROUTINE_FAIL No output from routine run", flush=True)
 
-            if result.stdout:
-                output = result.stdout.strip()
-                if "HEARTBEAT_OK" not in output:
-                    # Something actionable — log it
-                    print(output, flush=True)
-                else:
-                    print("HEARTBEAT_OK", flush=True)
-            if result.stderr:
-                print(result.stderr, flush=True)
+                        if result.stderr:
+                            print(result.stderr, flush=True)
+                    except subprocess.TimeoutExpired:
+                        print(
+                            f"ROUTINE_FAIL {routine.name} timed out after 300s",
+                            flush=True,
+                        )
 
             # Update last heartbeat
             meta["last_heartbeat"] = now
