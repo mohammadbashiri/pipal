@@ -4,13 +4,13 @@
 - Refactor agent definition to minimal identity/policy/memory
 - Add task + assignment abstractions
 - Implement RPC backend for headless runs
-- Replace direct `pi` wrapper with `pi-agents` CLI commands
+- Replace direct `pi` wrapper with `pal` CLI commands
 
 ## Changes
 ### 1) Agent definition (minimal)
-- Keep: `identity.md`, `policy.md` (rename from principles?), `memory.md`
+- Files: AGENTS/IDENTITY/POLICY/USER/MEMORY/JOURNAL
 - Move/remove: task/routine-specific files from agent directory
-- Optional: `journal.jsonl` for audit trail
+- Optional: journal for audit trail
 
 ### 2) Tasks + assignments
 - Add top-level `tasks/` directory
@@ -34,16 +34,18 @@
 ## Decisions
 - Task file format: Markdown + YAML frontmatter
 - Assignments registry: repo-root `assignments.json`
-- Agent files: keep `identity.md`, rename `principles.md` -> `policy.md`, drop `strategy.md`
+- Agent files: uppercase (AGENTS/IDENTITY/POLICY/USER/MEMORY/JOURNAL)
 - Run summaries: per-task (e.g. `tasks/<id>/runs/`)
-- Default storage: central store (e.g. `~/.pi/agents`, `~/.pi/tasks`) but allow custom paths
+- Default storage: central store (e.g. `~/.pal/agents`, `~/.pal/tasks`) but allow custom paths
 
 ## Chunks (status)
 - 🟠 1) Schema + templates (agents/tasks/assignments)
-  - updated identity/policy templates for first‑run behavior
+  - uppercase files + AGENTS/USER
+  - first-run behavior + autonomy + memory rules
 - 🟠 2) Rename CLI to `pal`
 - 🟠 3) CLI changes (space-subcommands + agent chat/ask)
-  - auto-greet extension for clean first-run chat
+  - auto-greet extension (first-time vs returning sessions)
+  - interactive model picker on agent create
 - 🔴 4) Runner changes (tasks + assignments wiring)
 - 🔴 5) RPC backend
 
