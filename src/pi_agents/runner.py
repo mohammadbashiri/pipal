@@ -5,20 +5,17 @@ from pathlib import Path
 
 
 PERSONA_FILES = [
-    "identity.md",
-    "principles.md",
-    "strategy.md",
-    "memory.md",
-    "reflection.md",
-    "heartbeat.md",
+    "AGENTS.md",
+    "IDENTITY.md",
+    "POLICY.md",
+    "USER.md",
+    "MEMORY.md",
 ]
 
 ROUTINE_CONTEXT_FILES = [
-    "identity.md",
-    "principles.md",
-    "strategy.md",
-    "memory.md",
-    "reflection.md",
+    "IDENTITY.md",
+    "POLICY.md",
+    "MEMORY.md",
 ]
 
 def _heartbeat_files(agent: Path) -> list[Path]:
@@ -56,16 +53,21 @@ def _find_native_pi() -> str:
     )
 
 
-def load_persona(agent_path: str) -> str:
-    """Read persona markdown files and concatenate into a system prompt."""
+def _load_files(files: list[Path]) -> str:
+    """Read markdown files and concatenate into a system prompt."""
     parts = []
-    for fname in PERSONA_FILES:
-        fp = Path(agent_path) / fname
+    for fp in files:
         if fp.exists():
             content = fp.read_text(encoding="utf-8").strip()
             if content:
                 parts.append(content)
     return "\n\n---\n\n".join(parts)
+
+
+def load_persona(agent_path: str) -> str:
+    """Read persona markdown files and concatenate into a system prompt."""
+    files = [Path(agent_path) / fname for fname in PERSONA_FILES]
+    return _load_files(files)
 
 
 def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
@@ -83,6 +85,9 @@ def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
     return session_name, remaining
 
 
+EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "auto_greet.ts"
+
+
 def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     """Invoke pi with persona context, passing through any extra CLI args."""
     # Extract our flags before passing to pi
@@ -98,6 +103,9 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         no_session = True
 
     cmd = ["pi"]
+
+    if EXTENSION_PATH.exists():
+        cmd += ["--extension", str(EXTENSION_PATH)]
 
     provider = llm_config.get("provider")
     model = llm_config.get("model")
@@ -120,22 +128,20 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         if session_file.exists():
             cmd.append("-c")
 
-    # Inject persona files via @file syntax
+    # Append persona context to the system prompt (kept out of chat log)
     if heartbeat_only:
-        files_to_inject = _heartbeat_files(agent)
+        system_prompt = _load_files(_heartbeat_files(agent))
     elif routine_only:
-        files_to_inject = [agent / fname for fname in ROUTINE_CONTEXT_FILES]
+        system_prompt = _load_files([agent / fname for fname in ROUTINE_CONTEXT_FILES])
     else:
-        files_to_inject = [agent / fname for fname in PERSONA_FILES]
+        system_prompt = load_persona(agent_path)
 
-    for fp in files_to_inject:
-        if fp.exists():
-            content = fp.read_text(encoding="utf-8").strip()
-            if content:
-                cmd.append(f"@{fp.resolve()}")
+    if system_prompt:
+        cmd += ["--append-system-prompt", system_prompt]
 
     # Pass through all remaining user args (prompts, flags, etc.)
     cmd += extra_args
 
+    os.environ["PAL_AGENT_DIR"] = str(agent.resolve())
     pi_bin = _find_native_pi()
     os.execv(pi_bin, cmd)
