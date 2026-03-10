@@ -87,11 +87,9 @@ def main(argv=None):
             if _interactive_set_llm(path, args.name):
                 return 0
 
-            print(f"[dim]Set model with:[/dim]")
-            print(f"[dim]pal agent set-llm {args.name} \"provider:model\"[/dim]")
-
-
-            return 0
+            print("[red]Model selection required.[/red]")
+            print("Run `pi` and complete /login, then try again.")
+            return 2
 
         if args.agent_cmd == "remove":
             a = get_agent(args.name)
@@ -289,9 +287,11 @@ def _interactive_set_llm(agent_path: str, name: str) -> bool:
             text=True,
         )
     except FileNotFoundError:
+        print("[red]pi not found.[/red] Install with: npm install -g @mariozechner/pi-coding-agent")
         return False
 
     if result.returncode != 0 or not result.stdout:
+        print("[yellow]No models available.[/yellow] Run `pi` and complete /login, then try again.")
         return False
 
     lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
