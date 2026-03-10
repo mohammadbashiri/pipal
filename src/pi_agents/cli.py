@@ -10,20 +10,28 @@ from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="pi", add_help=True)
+    p = argparse.ArgumentParser(prog="pal", add_help=True)
     sub = p.add_subparsers(dest="cmd")
 
     pa = sub.add_parser("agent", help="Manage agents")
     sub2 = pa.add_subparsers(dest="agent_cmd")
 
-    p_add = sub2.add_parser("add", help="Register an agent (and create folder if missing)")
-    p_add.add_argument("name")
-    p_add.add_argument("path", nargs="?", default=None)
+    p_create = sub2.add_parser("create", help="Register an agent (and create folder if missing)")
+    p_create.add_argument("name")
+    p_create.add_argument("path", nargs="?", default=None)
 
-    p_rm = sub2.add_parser("rm", help="Remove an agent")
-    p_rm.add_argument("name")
+    p_remove = sub2.add_parser("remove", help="Remove an agent")
+    p_remove.add_argument("name")
 
-    sub2.add_parser("ls", help="List agents")
+    sub2.add_parser("list", help="List agents")
+
+    p_chat = sub2.add_parser("chat", help="Chat with an agent (interactive TUI)")
+    p_chat.add_argument("name")
+    p_chat.add_argument("args", nargs=argparse.REMAINDER)
+
+    p_ask = sub2.add_parser("ask", help="Ask an agent (one-shot prompt)")
+    p_ask.add_argument("name")
+    p_ask.add_argument("prompt", nargs=argparse.REMAINDER)
 
     p_set = sub2.add_parser("set-llm", help="Set agent llm.json")
     p_set.add_argument("name")
@@ -54,38 +62,10 @@ def build_parser():
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
 
-    # Agent mode (passthrough to pi with persona context)
-    # Only trigger if --agent is used outside a known subcommand
-    known_subcmds = {"agent", "daemon"}
-    first_arg = argv[0] if argv else None
-    if "--agent" in argv and first_arg not in known_subcmds:
-        i = argv.index("--agent")
-        if i + 1 >= len(argv):
-            print("[red]Missing agent name after --agent[/red]")
-            return 2
-        name = argv[i + 1]
-        # Everything except --agent <name> passes through to pi
-        extra_args = argv[:i] + argv[i + 2:]
-
-        a = get_agent(name)
-        if not a:
-            print(f"[red]Unknown agent[/red] {name}. Run: pi agent ls")
-            return 2
-
-        llm = load_llm_config(a["path"])
-        if not llm:
-            print("[yellow]No llm.json found. Run:[/yellow]")
-            print(f'  pi agent set-llm {name} "provider:model"')
-            return 2
-
-        # Hand off to pi with persona injected
-        run_agent(a["path"], llm, extra_args)
-        return 0  # unreachable after execvp, but keeps linters happy
-
     args = build_parser().parse_args(argv)
 
     if args.cmd == "agent":
-        if args.agent_cmd == "add":
+        if args.agent_cmd == "create":
             base = args.path or "."
             path = str((Path(base) / args.name).expanduser().resolve())
             Path(path).mkdir(parents=True, exist_ok=True)
@@ -104,12 +84,12 @@ def main(argv=None):
             ensure_agent_scaffold(path, name=args.name)
 
             print(f"[dim]Set model with:[/dim]")
-            print(f"[dim]pi agent set-llm {args.name} \"provider:model\"[/dim]")
+            print(f"[dim]pal agent set-llm {args.name} \"provider:model\"[/dim]")
 
 
             return 0
 
-        if args.agent_cmd == "rm":
+        if args.agent_cmd == "remove":
             a = get_agent(args.name)
             if a and stop_daemon(a["path"]):
                 print(f"[green]Stopped[/green] daemon for [bold]{args.name}[/bold]")
@@ -126,7 +106,7 @@ def main(argv=None):
                     print(f"[green]Deleted[/green] {path}")
             return 0
 
-        if args.agent_cmd == "ls":
+        if args.agent_cmd == "list":
             agents = list_agents()
             if not agents:
                 print("[yellow]No agents registered[/yellow]")
@@ -134,11 +114,47 @@ def main(argv=None):
             for name, p in agents.items():
                 print(f"- [bold]{name}[/bold]  {p}")
             return 0
+
+        if args.agent_cmd == "chat":
+            a = get_agent(args.name)
+            if not a:
+                print(f"[red]Unknown agent[/red] {args.name}. Run: pal agent list")
+                return 2
+
+            llm = load_llm_config(a["path"])
+            if not llm:
+                print("[yellow]No llm.json found. Run:[/yellow]")
+                print(f'  pal agent set-llm {args.name} "provider:model"')
+                return 2
+
+            extra_args = args.args or []
+            run_agent(a["path"], llm, extra_args)
+            return 0
+
+        if args.agent_cmd == "ask":
+            a = get_agent(args.name)
+            if not a:
+                print(f"[red]Unknown agent[/red] {args.name}. Run: pal agent list")
+                return 2
+
+            llm = load_llm_config(a["path"])
+            if not llm:
+                print("[yellow]No llm.json found. Run:[/yellow]")
+                print(f'  pal agent set-llm {args.name} "provider:model"')
+                return 2
+
+            if not args.prompt:
+                print("[red]Missing prompt.[/red] Usage: pal agent ask <name> \"...\"")
+                return 2
+
+            extra_args = args.prompt or []
+            run_agent(a["path"], llm, extra_args)
+            return 0
         
         if args.agent_cmd == "set-llm":
             a = get_agent(args.name)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.name}. Run: pi agent ls")
+                print(f"[red]Unknown agent[/red] {args.name}. Run: pal agent list")
                 return 2
 
             ensure_agent_scaffold(a["path"], name=args.name)
@@ -155,8 +171,8 @@ def main(argv=None):
 
             if not provider or not model:
                 print("[red]Missing model info.[/red] Use either:")
-                print(f'  pi agent set-llm {args.name} --provider ollama --model "Mistral:7b"')
-                print(f'  pi agent set-llm {args.name} "ollama:Mistral:7b"')
+                print(f'  pal agent set-llm {args.name} --provider ollama --model "Mistral:7b"')
+                print(f'  pal agent set-llm {args.name} "ollama:Mistral:7b"')
                 return 2
 
             written = write_llm_json(a["path"], provider, model)
@@ -168,7 +184,7 @@ def main(argv=None):
         if args.daemon_cmd == "start":
             a = get_agent(args.agent)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
                 return 2
             try:
                 interval = parse_interval(args.every)
@@ -192,7 +208,7 @@ def main(argv=None):
         if args.daemon_cmd == "stop":
             a = get_agent(args.agent)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
                 return 2
             if stop_daemon(a["path"]):
                 print(f"[green]Stopped[/green] daemon for [bold]{args.agent}[/bold]")
@@ -203,7 +219,7 @@ def main(argv=None):
         if args.daemon_cmd == "status":
             a = get_agent(args.agent)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
                 return 2
             st = daemon_status(a["path"])
             if not st:
@@ -225,7 +241,7 @@ def main(argv=None):
         if args.daemon_cmd == "logs":
             a = get_agent(args.agent)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pi agent ls")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
                 return 2
             output = daemon_logs(a["path"], lines=args.n)
             if output:
@@ -234,7 +250,7 @@ def main(argv=None):
                 print("[yellow]No logs yet[/yellow]")
             return 0
 
-    print("[yellow]Tip:[/yellow] use `pi agent add|ls|rm` or `pi --agent <name> \"...\"`")
+    print("[yellow]Tip:[/yellow] use `pal agent create|list|remove|ask`")
     return 0
 
 def parse_llm_spec(spec: str):

@@ -6,13 +6,13 @@ readme = "README.md"
 authors = [
     { name = "Mo Bashiri", email = "mohammadbashiri93@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "rich>=14.3.3",
 ]
 
 [project.scripts]
-pi = "pi_agents.cli:main"
+pal = "pi_agents.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.16,<0.10.0"]

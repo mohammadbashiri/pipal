@@ -2,7 +2,16 @@ import json
 import importlib.resources
 from pathlib import Path
 
-DEFAULT_DIRS = ["skills", "tools", "routines", "sessions"]
+DEFAULT_DIRS = ["skills", "tools", "sessions"]
+
+AGENT_FILES = [
+    "AGENTS.md",
+    "IDENTITY.md",
+    "POLICY.md",
+    "USER.md",
+    "MEMORY.md",
+    "JOURNAL.md",
+]
 
 TEMPLATE_PKG = "pi_agents.templates.default"
 
@@ -20,7 +29,7 @@ def ensure_agent_scaffold(agent_path: str, name: str = "assistant"):
 
     template_dir = importlib.resources.files(TEMPLATE_PKG)
     for item in template_dir.iterdir():
-        if item.name.endswith(".md"):
+        if item.name in AGENT_FILES:
             fp = p / item.name
             if not fp.exists():
                 content = item.read_text(encoding="utf-8")

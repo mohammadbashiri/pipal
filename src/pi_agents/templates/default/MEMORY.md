@@ -1,4 +1,4 @@
-# Memory
+# MEMORY.md
 
 ## Preferences
 
@@ -9,4 +9,3 @@
 ## Facts
 
 ## Decisions
-
