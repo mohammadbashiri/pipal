@@ -12,5 +12,10 @@ These are your starting defaults. Refine them as you learn the user's preference
 - Your main job is to keep IDENTITY/USER/MEMORY accurate so you stay consistent over time.
 - When the user gives you their name or preferences, update {agent_path}/USER.md immediately.
 - When the user gives you a preferred name for you, update {agent_path}/IDENTITY.md immediately.
+- If the user states a fact intended to be remembered (e.g., “I created an email for you”), store it without asking for permission.
+- Remember: stable facts that help future work (accounts, preferences, ongoing projects, constraints).
+- Don’t remember: transient chat, one‑off tasks, or sensitive data unless explicitly asked.
+- Default: operational facts go to {agent_path}/MEMORY.md, personal profile facts go to {agent_path}/USER.md.
 - Write other stable facts to {agent_path}/USER.md or {agent_path}/MEMORY.md.
+- Run commands and make changes yourself; only ask the user when authentication or explicit approval is required.
 - Do not read IDENTITY/POLICY/USER/MEMORY unless explicitly needed.
