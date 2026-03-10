@@ -1,4 +1,4 @@
-import argparse, shutil, sys
+import argparse, shutil, sys, subprocess
 from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
@@ -83,6 +83,9 @@ def main(argv=None):
             print(f"[green]Ensured directory[/green] {path}")
 
             ensure_agent_scaffold(path, name=args.name)
+
+            if _interactive_set_llm(path, args.name):
+                return 0
 
             print(f"[dim]Set model with:[/dim]")
             print(f"[dim]pal agent set-llm {args.name} \"provider:model\"[/dim]")
@@ -274,5 +277,85 @@ def parse_llm_spec(spec: str):
     if not provider or not model:
         raise ValueError('Invalid spec. Expected "provider:model".')
     return provider, model
+
+
+def _interactive_set_llm(agent_path: str, name: str) -> bool:
+    """Interactive model selection. Returns True if llm.json written."""
+    try:
+        result = subprocess.run(
+            ["pi", "--list-models"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return False
+
+    if result.returncode != 0 or not result.stdout:
+        return False
+
+    lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return False
+
+    rows = []
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        provider, model = parts[0], parts[1]
+        rows.append((provider, model))
+
+    if not rows:
+        return False
+
+    providers = sorted({p for p, _ in rows})
+    print("\n[bold]Select provider[/bold]")
+    for i, p in enumerate(providers, 1):
+        print(f"  {i}. {p}")
+
+    while True:
+        provider_choice = Prompt.ask("Provider").strip()
+        if not provider_choice:
+            print("[red]Provider is required[/red]")
+            continue
+        if provider_choice.isdigit():
+            idx = int(provider_choice) - 1
+            if idx < 0 or idx >= len(providers):
+                print("[red]Invalid provider selection[/red]")
+                continue
+            provider = providers[idx]
+            break
+        if provider_choice in providers:
+            provider = provider_choice
+            break
+        print("[red]Unknown provider[/red]")
+
+    models = [m for p, m in rows if p == provider]
+    print(f"\n[bold]Select model[/bold] ({provider})")
+    for i, m in enumerate(models, 1):
+        print(f"  {i}. {m}")
+
+    while True:
+        model_choice = Prompt.ask("Model").strip()
+        if not model_choice:
+            print("[red]Model is required[/red]")
+            continue
+        if model_choice.isdigit():
+            idx = int(model_choice) - 1
+            if idx < 0 or idx >= len(models):
+                print("[red]Invalid model selection[/red]")
+                continue
+            model = models[idx]
+            break
+        if model_choice in models:
+            model = model_choice
+            break
+        print("[red]Unknown model[/red]")
+
+    written = write_llm_json(agent_path, provider, model)
+    print(f"[green]Updated[/green] {written}")
+    print(f"[cyan]LLM[/cyan] provider={provider} model={model}")
+    return True
 
 
