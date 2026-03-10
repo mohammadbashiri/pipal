@@ -31,6 +31,7 @@ def build_parser():
 
     p_ask = sub2.add_parser("ask", help="Ask an agent (one-shot prompt)")
     p_ask.add_argument("name")
+    p_ask.add_argument("--print", action="store_true", dest="print_only")
     p_ask.add_argument("prompt", nargs=argparse.REMAINDER)
 
     p_set = sub2.add_parser("set-llm", help="Set agent llm.json")
@@ -143,12 +144,24 @@ def main(argv=None):
                 print(f'  pal agent set-llm {args.name} "provider:model"')
                 return 2
 
-            if not args.prompt:
+            prompt = args.prompt or []
+            print_only = args.print_only
+            if prompt and prompt[0] in {"-p", "--print"}:
+                print_only = True
+                prompt = prompt[1:]
+
+            if not prompt:
                 print("[red]Missing prompt.[/red] Usage: pal agent ask <name> \"...\"")
                 return 2
 
-            extra_args = args.prompt or []
-            run_agent(a["path"], llm, extra_args)
+            if print_only:
+                from .runner import run_agent_print
+                response = run_agent_print(a["path"], llm, " ".join(prompt))
+                if response:
+                    print(response)
+                return 0
+
+            run_agent(a["path"], llm, prompt)
             return 0
         
         if args.agent_cmd == "set-llm":
@@ -250,7 +263,7 @@ def main(argv=None):
                 print("[yellow]No logs yet[/yellow]")
             return 0
 
-    print("[yellow]Tip:[/yellow] use `pal agent create|list|remove|ask`")
+    print("[yellow]Tip:[/yellow] use `pal agent ...`")
     return 0
 
 def parse_llm_spec(spec: str):
@@ -261,3 +274,5 @@ def parse_llm_spec(spec: str):
     if not provider or not model:
         raise ValueError('Invalid spec. Expected "provider:model".')
     return provider, model
+
+

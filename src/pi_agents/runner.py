@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import subprocess
 from pathlib import Path
 
 
@@ -88,23 +89,18 @@ def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
 EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "auto_greet.ts"
 
 
-def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
-    """Invoke pi with persona context, passing through any extra CLI args."""
-    # Extract our flags before passing to pi
-    session_name, extra_args = _extract_session_name(extra_args)
-    heartbeat_only = "--heartbeat-only" in extra_args
-    routine_only = "--routine-only" in extra_args
-    no_session = "--no-session" in extra_args
-    extra_args = [
-        a for a in extra_args
-        if a not in {"--heartbeat-only", "--routine-only", "--no-session"}
-    ]
-    if heartbeat_only or routine_only:
-        no_session = True
-
+def _build_pi_cmd(
+    agent_path: str,
+    llm_config: dict,
+    extra_args: list[str],
+    no_session: bool,
+    session_name: str,
+    system_prompt: str | None,
+    include_extension: bool = True,
+) -> list[str]:
     cmd = ["pi"]
 
-    if EXTENSION_PATH.exists():
+    if include_extension and EXTENSION_PATH.exists():
         cmd += ["--extension", str(EXTENSION_PATH)]
 
     provider = llm_config.get("provider")
@@ -129,6 +125,32 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
             cmd.append("-c")
 
     # Append persona context to the system prompt (kept out of chat log)
+    if system_prompt:
+        cmd += ["--append-system-prompt", system_prompt]
+
+    # Pass through all remaining user args (prompts, flags, etc.)
+    cmd += extra_args
+
+    return cmd
+
+
+def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
+    """Invoke pi with persona context, passing through any extra CLI args."""
+    # Extract our flags before passing to pi
+    session_name, extra_args = _extract_session_name(extra_args)
+    heartbeat_only = "--heartbeat-only" in extra_args
+    routine_only = "--routine-only" in extra_args
+    no_session = "--no-session" in extra_args
+    extra_args = [
+        a for a in extra_args
+        if a not in {"--heartbeat-only", "--routine-only", "--no-session"}
+    ]
+    if heartbeat_only or routine_only:
+        no_session = True
+
+    agent = Path(agent_path)
+
+    # Append persona context to the system prompt (kept out of chat log)
     if heartbeat_only:
         system_prompt = _load_files(_heartbeat_files(agent))
     elif routine_only:
@@ -136,12 +158,55 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     else:
         system_prompt = load_persona(agent_path)
 
-    if system_prompt:
-        cmd += ["--append-system-prompt", system_prompt]
-
-    # Pass through all remaining user args (prompts, flags, etc.)
-    cmd += extra_args
+    cmd = _build_pi_cmd(
+        agent_path=agent_path,
+        llm_config=llm_config,
+        extra_args=extra_args,
+        no_session=no_session,
+        session_name=session_name,
+        system_prompt=system_prompt,
+    )
 
     os.environ["PAL_AGENT_DIR"] = str(agent.resolve())
     pi_bin = _find_native_pi()
     os.execv(pi_bin, cmd)
+
+
+def run_agent_print(
+    agent_path: str,
+    llm_config: dict,
+    prompt: str,
+    no_session: bool = True,
+    session_name: str = "main",
+) -> str:
+    """Run pi in print mode and return the assistant response."""
+    agent = Path(agent_path)
+    system_prompt = load_persona(agent_path)
+
+    cmd = _build_pi_cmd(
+        agent_path=agent_path,
+        llm_config=llm_config,
+        extra_args=["-p", prompt],
+        no_session=no_session,
+        session_name=session_name,
+        system_prompt=system_prompt,
+        include_extension=True,
+    )
+
+    env = os.environ.copy()
+    env["PAL_AGENT_DIR"] = str(agent.resolve())
+    env["PAL_DISABLE_AUTOGREET"] = "1"
+
+    pi_bin = _find_native_pi()
+    result = subprocess.run(
+        [pi_bin, *cmd[1:]],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    output = (result.stdout or "").strip()
+    if not output and result.stderr:
+        output = result.stderr.strip()
+    return output

@@ -2,10 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const GREET_INSTRUCTION =
+const INTRO_GREET_INSTRUCTION =
   "Begin the conversation now. Say you just came online and are excited to meet them. Briefly introduce yourself and ask whether they want to keep your current name or give you a different one. Then ask what they want to be called. Keep it short (one or two questions). Avoid jumping into work topics yet.";
 
-function shouldGreet(agentDir?: string | null) {
+const RETURN_GREET_INSTRUCTION =
+  "Begin the conversation now. Greet the user briefly as someone you already know. Do not re-introduce yourself or ask for names. Ask what they'd like to do or talk about.";
+
+function isFirstEver(agentDir?: string | null) {
   if (!agentDir) return true;
   const marker = path.join(agentDir, ".pal_initialized");
   return !fs.existsSync(marker);
@@ -21,8 +24,10 @@ function markInitialized(agentDir?: string | null) {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
+    if (process.env.PAL_DISABLE_AUTOGREET === "1") return;
+
     const agentDir = process.env.PAL_AGENT_DIR;
-    if (!shouldGreet(agentDir)) return;
+    const firstEver = isFirstEver(agentDir);
 
     const entries = ctx.sessionManager.getEntries();
     const hasMessages = entries.some((entry) => entry.type === "message");
@@ -39,12 +44,14 @@ export default function (pi: ExtensionAPI) {
     pi.sendMessage(
       {
         customType: "pal-autogreet",
-        content: GREET_INSTRUCTION,
+        content: firstEver ? INTRO_GREET_INSTRUCTION : RETURN_GREET_INSTRUCTION,
         display: false,
       },
       options
     );
 
-    markInitialized(agentDir);
+    if (firstEver) {
+      markInitialized(agentDir);
+    }
   });
 }
