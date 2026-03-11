@@ -1,5 +1,6 @@
 import json
 import importlib.resources
+from datetime import datetime
 from pathlib import Path
 
 DEFAULT_DIRS = ["skills", "tools", "sessions"]
@@ -24,6 +25,7 @@ def _load_template(filename: str) -> str:
 def ensure_agent_scaffold(agent_path: str, name: str = "assistant"):
     p = Path(agent_path)
     p.mkdir(parents=True, exist_ok=True)
+    created_at = datetime.now().isoformat()
     for d in DEFAULT_DIRS:
         (p / d).mkdir(parents=True, exist_ok=True)
 
@@ -35,6 +37,7 @@ def ensure_agent_scaffold(agent_path: str, name: str = "assistant"):
                 content = item.read_text(encoding="utf-8")
                 content = content.replace("{name}", name)
                 content = content.replace("{agent_path}", str(p.resolve()))
+                content = content.replace("{created_at}", created_at)
                 fp.write_text(content, encoding="utf-8")
         elif item.is_dir() and item.name in DEFAULT_DIRS:
             for sub in item.iterdir():
@@ -44,6 +47,7 @@ def ensure_agent_scaffold(agent_path: str, name: str = "assistant"):
                         content = sub.read_text(encoding="utf-8")
                         content = content.replace("{name}", name)
                         content = content.replace("{agent_path}", str(p.resolve()))
+                        content = content.replace("{created_at}", created_at)
                         fp.write_text(content, encoding="utf-8")
 
 def write_llm_json(agent_path: str, provider: str, model: str):

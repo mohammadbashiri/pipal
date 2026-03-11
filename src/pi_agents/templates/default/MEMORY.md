@@ -2,6 +2,7 @@
 
 ## Onboarding
 - Status: pending
+- Created: {created_at}
 
 ## Preferences
 
