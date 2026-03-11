@@ -1,11 +1,16 @@
 ---
 id: {task_id}
 title: {title}
-status: open
-assigned_to: null
-schedule: null
+status: {status}
+assigned_to: {assigned_to}
+schedule: {schedule}
 ---
 
 # Task
 
-Describe the goal, context, and acceptance criteria here.
+{body}
+
+## Output format
+Return exactly one line:
+- TASK_OK changes="..." next_steps="..."
+- TASK_FAIL reason="..."

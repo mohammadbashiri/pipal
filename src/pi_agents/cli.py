@@ -2,11 +2,25 @@ import argparse, shutil, sys, subprocess
 from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
+from rich.table import Table
 from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pal_dir
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
-from .runner import run_agent
+from .runner import run_agent, run_agent_print, run_agent_custom_prompt
 from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
+from .tasks import (
+    create_task,
+    list_tasks,
+    load_task,
+    append_run_log,
+    last_run,
+    parse_task_response,
+    parse_task_message,
+    remove_task,
+    task_id_from_title,
+    task_root_global,
+    task_root_personal,
+)
 
 
 def build_parser():
@@ -40,6 +54,38 @@ def build_parser():
     p_set.add_argument("--provider", default=None)
     p_set.add_argument("--model", default=None)
 
+    # ── task subcommands ──
+    pt = sub.add_parser("task", help="Manage tasks")
+    tsub = pt.add_subparsers(dest="task_cmd")
+
+    t_create = tsub.add_parser("create", help="Create a task")
+    t_create.add_argument("title")
+    t_create.add_argument("--agent", default=None, help="Agent name (personal task)")
+    t_create.add_argument("--schedule", default=None, help='Schedule like "1w" or "1d"')
+    t_create.add_argument("--no-interactive", action="store_true", help="Disable interactive prompts")
+
+    t_edit = tsub.add_parser("edit", help="Edit a task")
+    t_edit.add_argument("task_id")
+    t_edit.add_argument("--agent", default=None, help="Agent name (personal task)")
+    t_edit.add_argument("--global", dest="global_only", action="store_true", help="Edit a global task")
+
+    t_list = tsub.add_parser("list", help="List tasks")
+    t_list.add_argument("--agent", default=None, help="Agent name (list personal tasks)")
+    t_list.add_argument("--global", dest="global_only", action="store_true", help="List global tasks only")
+
+    t_run = tsub.add_parser("run", help="Run a task")
+    t_run.add_argument("task_id")
+    t_run.add_argument("--agent", default=None, help="Agent name (personal task)")
+
+    t_status = tsub.add_parser("status", help="Show task status")
+    t_status.add_argument("--agent", default=None, help="Agent name (list personal tasks)")
+    t_status.add_argument("--global", dest="global_only", action="store_true", help="Show global tasks only")
+
+    t_remove = tsub.add_parser("remove", help="Remove a task")
+    t_remove.add_argument("task_id")
+    t_remove.add_argument("--agent", default=None, help="Agent name (personal task)")
+    t_remove.add_argument("--global", dest="global_only", action="store_true", help="Remove a global task")
+
     # ── daemon subcommands ──
     pd = sub.add_parser("daemon", help="Manage agent daemon")
     dsub = pd.add_subparsers(dest="daemon_cmd")
@@ -67,6 +113,382 @@ def main(argv=None):
         print("[green]Migrated[/green] agent registry to ~/.pal/agents.json")
 
     args = build_parser().parse_args(argv)
+
+    if args.cmd == "task":
+        if args.task_cmd == "create":
+            agent = None
+            if args.agent:
+                agent = get_agent(args.agent)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    return 2
+
+            assigned_to = None
+            schedule = args.schedule
+            body = None
+
+            if not args.no_interactive:
+                if not agent:
+                    print("[red]Interactive task creation requires --agent.[/red]")
+                    return 2
+
+                llm = load_llm_config(agent["path"])
+                if not llm:
+                    print("[yellow]No llm.json found. Run:[/yellow]")
+                    print(f'  pal agent set-llm {agent["name"]} "provider:model"')
+                    return 2
+
+                task_id = task_id_from_title(args.title)
+                root = task_root_personal(agent["path"])
+                task_dir = root / task_id
+                task_file = task_dir / "task.md"
+
+                task_dir.mkdir(parents=True, exist_ok=True)
+
+                if task_file.exists():
+                    print("[yellow]Task already exists. Use edit instead.[/yellow]")
+                    print(f"  pal task edit \"{args.title}\" --agent {agent['name']}")
+                    return 0
+
+                assigned_to = agent["name"]
+                schedule_hint = schedule or "(none)"
+
+                create_task(
+                    args.title,
+                    agent=agent,
+                    schedule=schedule,
+                    assigned_to=assigned_to,
+                    body="Describe the goal, context, and acceptance criteria here.",
+                    status="draft",
+                )
+
+                current_content = task_file.read_text(encoding="utf-8")
+
+                system_prompt = (
+                    "You are in task-creation mode. Your ONLY goal is to define a task file with the user. "
+                    "Do not discuss any other topics. If the user goes off-topic, gently redirect back to task definition. "
+                    "Guide the user step-by-step. Ask ONE focused question at a time and wait for the answer before moving on. "
+                    "Start with a brief, warm intro: greet the user,show some excitement about creating the task, mention the task name and current status (draft), suggest the next step, and ask to start in a friendly tone. "
+                    "Then ask the goal in simple terms (build on the task title), followed by context, acceptance criteria, and constraints/notes. "
+                    "Finally ask for schedule (optional). Summarize the draft and ask for confirmation. "
+                    "At each step, suggest one or two options or examples and briefly explain why, then let the user decide. "
+                    "Do not say 'Got it' or acknowledge hidden prompts. "
+                    "When confirmed, write the task file to the exact path below using the provided template. "
+                    "Use file tools to write the task file. "
+                    "Do not write the file before confirmation. "
+                    "When confirmed, set status to \"open\". "
+                    f"\n\nTask path: {task_file}\n"
+                    f"Task id (fixed): {task_id}\n"
+                    f"Assigned to (fixed): {assigned_to}\n"
+                    f"Schedule (default): {schedule_hint}\n\n"
+                    "Current task file:\n"
+                    "---\n"
+                    f"{current_content}\n"
+                    "---\n"
+                )
+
+                run_agent_custom_prompt(
+                    agent_path=agent["path"],
+                    llm_config=llm,
+                    extra_args=["--no-session"],
+                    system_prompt=system_prompt,
+                    # start_prompt="Start the task-creation dialog now with a brief intro, then ask the first focused question.",
+                )
+                return 0
+
+            try:
+                task_file = create_task(
+                    args.title,
+                    agent=agent,
+                    schedule=schedule,
+                    assigned_to=assigned_to,
+                    body=body,
+                )
+            except FileExistsError as e:
+                print(f"[yellow]{e}[/yellow]")
+                return 0
+
+            print(f"[green]Created[/green] {task_file}")
+            return 0
+
+        if args.task_cmd == "edit":
+            if args.agent and args.global_only:
+                print("[red]Use either --agent or --global, not both.[/red]")
+                return 2
+
+            if not args.agent and not args.global_only:
+                print("[red]Specify --agent or --global to edit a task.[/red]")
+                return 2
+
+            agent = None
+            task_dir = None
+            if args.agent:
+                agent = get_agent(args.agent)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    return 2
+                root = task_root_personal(agent["path"])
+            else:
+                root = task_root_global()
+
+            task_dir = root / args.task_id
+            if not task_dir.exists():
+                alt_id = task_id_from_title(args.task_id)
+                task_dir = root / alt_id
+
+            task_file = task_dir / "task.md"
+            if not task_file.exists():
+                print("[red]Task not found. Create it first.[/red]")
+                if args.agent:
+                    print(f"  pal task create \"{args.task_id}\" --agent {agent['name']}")
+                else:
+                    print(f"  pal task create \"{args.task_id}\" --no-interactive")
+                return 2
+
+            task = load_task(task_file)
+            if not agent:
+                assigned_to = task.get("assigned_to")
+                if not assigned_to:
+                    print("[red]Task has no assigned_to. Specify --agent.[/red]")
+                    return 2
+                agent = get_agent(assigned_to)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {assigned_to}. Run: pal agent list")
+                    return 2
+
+            llm = load_llm_config(agent["path"])
+            if not llm:
+                print("[yellow]No llm.json found. Run:[/yellow]")
+                print(f'  pal agent set-llm {agent["name"]} "provider:model"')
+                return 2
+
+            current_content = task_file.read_text(encoding="utf-8")
+            schedule_hint = task.get("schedule") or "(none)"
+
+            system_prompt = (
+                "You are in task-edit mode. Your ONLY goal is to refine this task with the user. "
+                "Do not discuss any other topics. If the user goes off-topic, gently redirect back to task editing. "
+                "Guide the user step-by-step. Ask ONE focused question at a time and wait for the answer before moving on. "
+                "Focus on unclear sections, then confirm the final draft. "
+                "At each step, suggest one or two options or improvements and briefly explain why, then let the user decide. "
+                "Do not say 'Got it' or acknowledge hidden prompts; begin directly with the first question. "
+                "When confirmed, overwrite the task file at the exact path below using the updated content. "
+                "Use file tools to write the task file. Do not write before confirmation. "
+                "When confirmed, set status to \"open\". "
+                f"\n\nTask path: {task_file}\n"
+                f"Task id (fixed): {task.get('id') or args.task_id}\n"
+                f"Assigned to (fixed): {task.get('assigned_to') or agent['name']}\n"
+                f"Schedule (current): {schedule_hint}\n\n"
+                "Current task file:\n"
+                "---\n"
+                f"{current_content}\n"
+                "---\n"
+            )
+
+            run_agent_custom_prompt(
+                agent_path=agent["path"],
+                llm_config=llm,
+                extra_args=["--no-session"],
+                system_prompt=system_prompt,
+                start_prompt="Start the task-edit dialog now. Ask the first focused question without preamble.",
+            )
+            return 0
+
+        if args.task_cmd == "list":
+            if args.agent and args.global_only:
+                print("[red]Use either --agent or --global, not both.[/red]")
+                return 2
+
+            entries = []
+            if args.agent:
+                agent = get_agent(args.agent)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    return 2
+                root = task_root_personal(agent["path"])
+                tasks = list_tasks(root)
+                entries.extend(("personal", agent["name"], name, path) for name, path in tasks)
+            elif args.global_only:
+                root = task_root_global()
+                tasks = list_tasks(root)
+                entries.extend(("global", None, name, path) for name, path in tasks)
+            else:
+                tasks = list_tasks(task_root_global())
+                entries.extend(("global", None, name, path) for name, path in tasks)
+                for agent_name, agent_path in list_agents().items():
+                    tasks = list_tasks(task_root_personal(agent_path))
+                    entries.extend(("personal", agent_name, name, path) for name, path in tasks)
+
+            if not entries:
+                print("[yellow]No tasks found[/yellow]")
+                return 0
+
+            for scope, agent_name, name, path in entries:
+                scope_label = "global" if scope == "global" else f"personal({agent_name})"
+                print(f"- {name} [{scope_label}]  {path}")
+            return 0
+
+        if args.task_cmd == "run":
+            agent = None
+            if args.agent:
+                agent = get_agent(args.agent)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    return 2
+                root = task_root_personal(agent["path"])
+            else:
+                root = task_root_global()
+
+            task_dir = root / args.task_id
+            if not task_dir.exists():
+                alt_id = task_id_from_title(args.task_id)
+                task_dir = root / alt_id
+
+            task_file = task_dir / "task.md"
+            if not task_file.exists():
+                print(f"[red]Task not found[/red] {task_file}")
+                return 2
+
+            task = load_task(task_file)
+            if not agent:
+                assigned_to = task.get("assigned_to")
+                if not assigned_to:
+                    print("[red]Task has no assigned_to. Specify --agent or set assigned_to in frontmatter.[/red]")
+                    return 2
+                agent = get_agent(assigned_to)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {assigned_to}. Run: pal agent list")
+                    return 2
+
+            llm = load_llm_config(agent["path"])
+            if not llm:
+                print("[yellow]No llm.json found. Run:[/yellow]")
+                print(f'  pal agent set-llm {agent["name"]} "provider:model"')
+                return 2
+
+            task_content = task_file.read_text(encoding="utf-8")
+            prompt = (
+                "TASK FILE:\n"
+                "---\n"
+                f"{task_content}\n"
+                "---\n\n"
+                "Execute only the task above. Use tools/files as needed to complete it. "
+                "Reply in exactly one line using one of these formats: "
+                "TASK_OK changes=\"...\" next_steps=\"...\" or "
+                "TASK_FAIL reason=\"...\"."
+            )
+            response = run_agent_print(agent["path"], llm, prompt)
+            status, message = parse_task_response(response)
+            log_path = append_run_log(task_file.parent, status, message)
+
+            print(f"{status} {message}")
+            print(f"[cyan]Logged[/cyan] {log_path}")
+            return 0
+
+        if args.task_cmd == "status":
+            if args.agent and args.global_only:
+                print("[red]Use either --agent or --global, not both.[/red]")
+                return 2
+
+            entries = []
+            if args.agent:
+                agent = get_agent(args.agent)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    return 2
+                tasks = list_tasks(task_root_personal(agent["path"]))
+                entries.extend(("personal", agent["name"], name, path) for name, path in tasks)
+            elif args.global_only:
+                tasks = list_tasks(task_root_global())
+                entries.extend(("global", None, name, path) for name, path in tasks)
+            else:
+                tasks = list_tasks(task_root_global())
+                entries.extend(("global", None, name, path) for name, path in tasks)
+                for agent_name, agent_path in list_agents().items():
+                    tasks = list_tasks(task_root_personal(agent_path))
+                    entries.extend(("personal", agent_name, name, path) for name, path in tasks)
+
+            if not entries:
+                print("[yellow]No tasks found[/yellow]")
+                return 0
+
+            table = Table(show_header=True, header_style="bold", show_lines=True)
+            table.add_column("ID", no_wrap=True)
+            table.add_column("Scope", no_wrap=True)
+            table.add_column("Title", overflow="fold")
+            table.add_column("Status", no_wrap=True)
+            table.add_column("Assigned", no_wrap=True)
+            table.add_column("Schedule", no_wrap=True)
+            table.add_column("Last Run", no_wrap=True)
+            table.add_column("Result", overflow="fold")
+
+            for scope, agent_name, name, path in entries:
+                task = load_task(path)
+                last = last_run(path.parent)
+                status = task.get("status") or "-"
+                assigned_to = task.get("assigned_to") or "-"
+                schedule = task.get("schedule") or "-"
+                title = task.get("title") or name
+                scope_label = "global" if scope == "global" else f"personal({agent_name})"
+
+                if last:
+                    parsed = parse_task_message(last["status"], last["message"])
+                    last_run_ts = last["timestamp"]
+                    if parsed["status"] == "TASK_OK":
+                        result = f"OK changes={parsed.get('changes') or '-'} next_steps={parsed.get('next_steps') or '-'}"
+                    else:
+                        result = f"FAIL reason={parsed.get('reason') or parsed.get('raw') or '-'}"
+                else:
+                    last_run_ts = "-"
+                    result = "-"
+
+                table.add_row(
+                    name,
+                    scope_label,
+                    title,
+                    status,
+                    assigned_to,
+                    schedule,
+                    last_run_ts,
+                    result,
+                )
+
+            print(table)
+            return 0
+
+        if args.task_cmd == "remove":
+            if args.agent and args.global_only:
+                print("[red]Use either --agent or --global, not both.[/red]")
+                return 2
+
+            if args.agent:
+                agent = get_agent(args.agent)
+                if not agent:
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    return 2
+                root = task_root_personal(agent["path"])
+            elif args.global_only:
+                root = task_root_global()
+            else:
+                print("[red]Specify --agent or --global to remove a task.[/red]")
+                return 2
+
+            task_dir = root / args.task_id
+            if not task_dir.exists():
+                alt_id = task_id_from_title(args.task_id)
+                task_dir = root / alt_id
+
+            if not task_dir.exists():
+                print(f"[yellow]Task not found[/yellow] {task_dir}")
+                return 0
+
+            if not Confirm.ask(f"Delete task directory {task_dir}?", default=False):
+                print("[yellow]Cancelled[/yellow]")
+                return 0
+
+            remove_task(task_dir)
+            print(f"[green]Removed[/green] {task_dir}")
+            return 0
 
     if args.cmd == "agent":
         if args.agent_cmd == "create":
@@ -159,7 +581,6 @@ def main(argv=None):
                 return 2
 
             if print_only:
-                from .runner import run_agent_print
                 response = run_agent_print(a["path"], llm, " ".join(prompt))
                 if response:
                     print(response)
