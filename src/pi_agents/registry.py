@@ -1,10 +1,24 @@
 import json, os
 from pathlib import Path
 
-def pi_dir(): return Path(os.environ.get("PI_HOME", Path.home() / ".pi"))
-def registry_path(): return pi_dir() / "agents.json"
+def pal_dir(): return Path(os.environ.get("PAL_HOME", Path.home() / ".pal"))
+def registry_path(): return pal_dir() / "agents.json"
+
+def legacy_registry_path():
+    return Path(os.environ.get("PI_HOME", Path.home() / ".pi")) / "agents.json"
+
+def migrate_registry():
+    new_path = registry_path()
+    old_path = legacy_registry_path()
+    if new_path.exists() or not old_path.exists():
+        return False
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    new_path.write_text(old_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return True
+
 
 def load_registry():
+    migrate_registry()
     p = registry_path()
     if not p.exists(): return {"agents": {}}
     with p.open("r", encoding="utf-8") as f:
@@ -20,6 +34,7 @@ def save_registry(reg):
     tmp.replace(p)
 
 def init_registry():
+    migrate_registry()
     p = registry_path()
     if not p.exists(): save_registry({"agents": {}})
     return p
@@ -33,12 +48,6 @@ def _entry_to_path(entry):
 
 def add_agent(name, path):
     p = registry_path()
-
-    # ensure pi runtime exists
-    if not p.parent.exists():
-        raise RuntimeError(
-            "~/.pi does not exist. Install or run `pi` once before registering agents."
-        )
 
     created = False
     if not p.exists():
