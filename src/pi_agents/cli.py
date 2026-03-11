@@ -2,7 +2,7 @@ import argparse, shutil, sys, subprocess
 from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
-from .registry import add_agent, rm_agent, list_agents, get_agent
+from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent
@@ -62,6 +62,9 @@ def build_parser():
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+
+    if migrate_registry():
+        print("[green]Migrated[/green] agent registry to ~/.pal/agents.json")
 
     args = build_parser().parse_args(argv)
 
