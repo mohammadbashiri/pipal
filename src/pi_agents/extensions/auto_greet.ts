@@ -24,23 +24,6 @@ function markInitialized(agentDir?: string | null) {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
-    const taskStartPrompt = process.env.PAL_TASK_START_PROMPT;
-    if (taskStartPrompt) {
-      const options = ctx.isIdle()
-        ? { triggerTurn: true }
-        : { deliverAs: "followUp" as const, triggerTurn: true };
-
-      pi.sendMessage(
-        {
-          customType: "pal-task-start",
-          content: taskStartPrompt,
-          display: false,
-        },
-        options
-      );
-      return;
-    }
-
     if (process.env.PAL_DISABLE_AUTOGREET === "1") return;
 
     const agentDir = process.env.PAL_AGENT_DIR;

@@ -6,10 +6,9 @@ from rich.table import Table
 from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pal_dir
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
-from .runner import run_agent, run_agent_print, run_agent_custom_prompt
+from .runner import run_agent, run_agent_print
 from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
 from .tasks import (
-    create_task,
     list_tasks,
     load_task,
     append_run_log,
@@ -58,17 +57,6 @@ def build_parser():
     pt = sub.add_parser("task", help="Manage tasks")
     tsub = pt.add_subparsers(dest="task_cmd")
 
-    t_create = tsub.add_parser("create", help="Create a task")
-    t_create.add_argument("title")
-    t_create.add_argument("--agent", default=None, help="Agent name (personal task)")
-    t_create.add_argument("--schedule", default=None, help='Schedule like "1w" or "1d"')
-    t_create.add_argument("--no-interactive", action="store_true", help="Disable interactive prompts")
-
-    t_edit = tsub.add_parser("edit", help="Edit a task")
-    t_edit.add_argument("task_id")
-    t_edit.add_argument("--agent", default=None, help="Agent name (personal task)")
-    t_edit.add_argument("--global", dest="global_only", action="store_true", help="Edit a global task")
-
     t_list = tsub.add_parser("list", help="List tasks")
     t_list.add_argument("--agent", default=None, help="Agent name (list personal tasks)")
     t_list.add_argument("--global", dest="global_only", action="store_true", help="List global tasks only")
@@ -115,184 +103,6 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
 
     if args.cmd == "task":
-        if args.task_cmd == "create":
-            agent = None
-            if args.agent:
-                agent = get_agent(args.agent)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
-                    return 2
-
-            assigned_to = None
-            schedule = args.schedule
-            body = None
-
-            if not args.no_interactive:
-                if not agent:
-                    print("[red]Interactive task creation requires --agent.[/red]")
-                    return 2
-
-                llm = load_llm_config(agent["path"])
-                if not llm:
-                    print("[yellow]No llm.json found. Run:[/yellow]")
-                    print(f'  pal agent set-llm {agent["name"]} "provider:model"')
-                    return 2
-
-                task_id = task_id_from_title(args.title)
-                root = task_root_personal(agent["path"])
-                task_dir = root / task_id
-                task_file = task_dir / "task.md"
-
-                task_dir.mkdir(parents=True, exist_ok=True)
-
-                if task_file.exists():
-                    print("[yellow]Task already exists. Use edit instead.[/yellow]")
-                    print(f"  pal task edit \"{args.title}\" --agent {agent['name']}")
-                    return 0
-
-                assigned_to = agent["name"]
-                schedule_hint = schedule or "(none)"
-
-                create_task(
-                    args.title,
-                    agent=agent,
-                    schedule=schedule,
-                    assigned_to=assigned_to,
-                    body="Describe the goal, context, and acceptance criteria here.",
-                    status="draft",
-                )
-
-                current_content = task_file.read_text(encoding="utf-8")
-
-                system_prompt = (
-                    "You are in task-creation mode. Your ONLY goal is to define a task file with the user. "
-                    "Do not discuss any other topics. If the user goes off-topic, gently redirect back to task definition. "
-                    "Guide the user step-by-step. Ask ONE focused question at a time and wait for the answer before moving on. "
-                    "Start with a brief, warm intro: greet the user,show some excitement about creating the task, mention the task name and current status (draft), suggest the next step, and ask to start in a friendly tone. "
-                    "Then ask the goal in simple terms (build on the task title), followed by context, acceptance criteria, and constraints/notes. "
-                    "Finally ask for schedule (optional). Summarize the draft and ask for confirmation. "
-                    "At each step, suggest one or two options or examples and briefly explain why, then let the user decide. "
-                    "Do not say 'Got it' or acknowledge hidden prompts. "
-                    "When confirmed, write the task file to the exact path below using the provided template. "
-                    "Use file tools to write the task file. "
-                    "Do not write the file before confirmation. "
-                    "When confirmed, set status to \"open\". "
-                    f"\n\nTask path: {task_file}\n"
-                    f"Task id (fixed): {task_id}\n"
-                    f"Assigned to (fixed): {assigned_to}\n"
-                    f"Schedule (default): {schedule_hint}\n\n"
-                    "Current task file:\n"
-                    "---\n"
-                    f"{current_content}\n"
-                    "---\n"
-                )
-
-                run_agent_custom_prompt(
-                    agent_path=agent["path"],
-                    llm_config=llm,
-                    extra_args=["--no-session"],
-                    system_prompt=system_prompt,
-                    # start_prompt="Start the task-creation dialog now with a brief intro, then ask the first focused question.",
-                )
-                return 0
-
-            try:
-                task_file = create_task(
-                    args.title,
-                    agent=agent,
-                    schedule=schedule,
-                    assigned_to=assigned_to,
-                    body=body,
-                )
-            except FileExistsError as e:
-                print(f"[yellow]{e}[/yellow]")
-                return 0
-
-            print(f"[green]Created[/green] {task_file}")
-            return 0
-
-        if args.task_cmd == "edit":
-            if args.agent and args.global_only:
-                print("[red]Use either --agent or --global, not both.[/red]")
-                return 2
-
-            if not args.agent and not args.global_only:
-                print("[red]Specify --agent or --global to edit a task.[/red]")
-                return 2
-
-            agent = None
-            task_dir = None
-            if args.agent:
-                agent = get_agent(args.agent)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
-                    return 2
-                root = task_root_personal(agent["path"])
-            else:
-                root = task_root_global()
-
-            task_dir = root / args.task_id
-            if not task_dir.exists():
-                alt_id = task_id_from_title(args.task_id)
-                task_dir = root / alt_id
-
-            task_file = task_dir / "task.md"
-            if not task_file.exists():
-                print("[red]Task not found. Create it first.[/red]")
-                if args.agent:
-                    print(f"  pal task create \"{args.task_id}\" --agent {agent['name']}")
-                else:
-                    print(f"  pal task create \"{args.task_id}\" --no-interactive")
-                return 2
-
-            task = load_task(task_file)
-            if not agent:
-                assigned_to = task.get("assigned_to")
-                if not assigned_to:
-                    print("[red]Task has no assigned_to. Specify --agent.[/red]")
-                    return 2
-                agent = get_agent(assigned_to)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {assigned_to}. Run: pal agent list")
-                    return 2
-
-            llm = load_llm_config(agent["path"])
-            if not llm:
-                print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pal agent set-llm {agent["name"]} "provider:model"')
-                return 2
-
-            current_content = task_file.read_text(encoding="utf-8")
-            schedule_hint = task.get("schedule") or "(none)"
-
-            system_prompt = (
-                "You are in task-edit mode. Your ONLY goal is to refine this task with the user. "
-                "Do not discuss any other topics. If the user goes off-topic, gently redirect back to task editing. "
-                "Guide the user step-by-step. Ask ONE focused question at a time and wait for the answer before moving on. "
-                "Focus on unclear sections, then confirm the final draft. "
-                "At each step, suggest one or two options or improvements and briefly explain why, then let the user decide. "
-                "Do not say 'Got it' or acknowledge hidden prompts; begin directly with the first question. "
-                "When confirmed, overwrite the task file at the exact path below using the updated content. "
-                "Use file tools to write the task file. Do not write before confirmation. "
-                "When confirmed, set status to \"open\". "
-                f"\n\nTask path: {task_file}\n"
-                f"Task id (fixed): {task.get('id') or args.task_id}\n"
-                f"Assigned to (fixed): {task.get('assigned_to') or agent['name']}\n"
-                f"Schedule (current): {schedule_hint}\n\n"
-                "Current task file:\n"
-                "---\n"
-                f"{current_content}\n"
-                "---\n"
-            )
-
-            run_agent_custom_prompt(
-                agent_path=agent["path"],
-                llm_config=llm,
-                extra_args=["--no-session"],
-                system_prompt=system_prompt,
-                start_prompt="Start the task-edit dialog now. Ask the first focused question without preamble.",
-            )
-            return 0
 
         if args.task_cmd == "list":
             if args.agent and args.global_only:

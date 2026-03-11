@@ -190,35 +190,6 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     )
 
 
-def run_agent_custom_prompt(
-    agent_path: str,
-    llm_config: dict,
-    extra_args: list[str],
-    system_prompt: str,
-    no_session: bool = True,
-    session_name: str = "main",
-    disable_autogreet: bool = False,
-    start_prompt: str | None = None,
-):
-    """Invoke pi with a custom system prompt."""
-    session_name, extra_args = _extract_session_name(extra_args)
-    if "--no-session" in extra_args:
-        no_session = True
-        extra_args = [a for a in extra_args if a != "--no-session"]
-
-    if start_prompt:
-        os.environ["PAL_TASK_START_PROMPT"] = start_prompt
-    if disable_autogreet:
-        os.environ["PAL_DISABLE_AUTOGREET"] = "1"
-
-    _run_agent_cmd(
-        agent_path=agent_path,
-        llm_config=llm_config,
-        extra_args=extra_args,
-        no_session=no_session,
-        session_name=session_name,
-        system_prompt=system_prompt,
-    )
 
 
 def run_agent_print(
