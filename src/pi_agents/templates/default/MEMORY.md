@@ -1,5 +1,8 @@
 # MEMORY.md
 
+## Onboarding
+- Status: pending
+
 ## Preferences
 
 ## Projects
