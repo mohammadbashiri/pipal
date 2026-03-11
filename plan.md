@@ -36,12 +36,13 @@
 - Assignments registry: repo-root `assignments.json`
 - Agent files: uppercase (AGENTS/IDENTITY/POLICY/USER/MEMORY/JOURNAL)
 - Run summaries: per-task (e.g. `tasks/<id>/runs/`)
-- Default storage: central store (e.g. `~/.pal/agents`, `~/.pal/tasks`) but allow custom paths
+- Default storage: `~/.pal/agents/<name>` + `~/.pal/agents.json`, allow custom paths
 
 ## Chunks (status)
 - 🟠 1) Schema + templates (agents/tasks/assignments)
   - uppercase files + AGENTS/USER
   - first-run behavior + autonomy + memory rules
+  - task.md reserved for upcoming tasks
 - 🟠 2) Rename CLI to `pal`
 - 🟠 3) CLI changes (space-subcommands + agent chat/ask)
   - auto-greet extension (first-time vs returning sessions)

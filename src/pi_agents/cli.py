@@ -2,7 +2,7 @@ import argparse, shutil, sys, subprocess
 from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
-from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry
+from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pal_dir
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent
@@ -70,13 +70,13 @@ def main(argv=None):
 
     if args.cmd == "agent":
         if args.agent_cmd == "create":
-            base = args.path or "."
+            base = args.path or str(pal_dir() / "agents")
             path = str((Path(base) / args.name).expanduser().resolve())
             Path(path).mkdir(parents=True, exist_ok=True)
 
             res = add_agent(args.name, path)  # should auto-create registry
             if isinstance(res, dict) and res.get("registry_created"):
-                print("[green]Created[/green] ~/.pi/agents.json")
+                print("[green]Created[/green] ~/.pal/agents.json")
                 print(f"[green]Registered[/green] {args.name} → {res['path']}")
             else:
                 # if your add_agent returns just a path string
