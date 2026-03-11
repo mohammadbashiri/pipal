@@ -13,8 +13,8 @@
 - Optional: journal for audit trail
 
 ### 2) Tasks + assignments
-- Add top-level `tasks/` directory
-- Define task file schema (markdown with optional frontmatter)
+- Add global tasks under `~/.pal/tasks` and personal tasks under `<agent>/tasks`
+- Define task file schema (markdown with YAML frontmatter)
 - Add assignments registry (e.g. `assignments.json` mapping task -> agent)
 - Provide commands:
   - `task.create`, `task.list`, `task.assign`, `task.run`, `task.status`
@@ -34,20 +34,24 @@
 ## Decisions
 - Task file format: Markdown + YAML frontmatter
 - Assignments registry: repo-root `assignments.json`
+- Task storage: global tasks in `~/.pal/tasks`, personal tasks in `<agent>/tasks`
 - Agent files: uppercase (AGENTS/IDENTITY/POLICY/USER/MEMORY/JOURNAL)
-- Run summaries: per-task (e.g. `tasks/<id>/runs/`)
+- Run summaries: per-task log file (e.g. `tasks/<id>/runs.log`)
 - Default storage: `~/.pal/agents/<name>` + `~/.pal/agents.json`, allow custom paths
 
 ## Chunks (status)
-- 🟠 1) Schema + templates (agents/tasks/assignments)
-  - uppercase files + AGENTS/USER
-  - first-run behavior + autonomy + memory rules
-  - task.md reserved for upcoming tasks
-- 🟠 2) Rename CLI to `pal`
-- 🟠 3) CLI changes (space-subcommands + agent chat/ask)
+- 🟡 1) Schema + templates (agents/tasks/assignments)
+  - uppercase files + AGENTS/USER ✅
+  - first-run behavior + autonomy + memory rules ✅
+  - task.md template + output format ✅
+- 🟡 2) Rename CLI to `pal`
+- 🟡 3) CLI changes (space-subcommands + agent chat/ask)
   - auto-greet extension (first-time vs returning sessions)
   - interactive model picker on agent create
-- 🔴 4) Runner changes (tasks + assignments wiring)
+  - task create/list/run/status ✅
+- 🟠 4) Runner changes (tasks + assignments wiring)
+  - scheduled runs via daemon ❌
+  - assignments registry ❌
 - 🔴 5) RPC backend
 
 ## Open Questions
