@@ -17,13 +17,15 @@
 - Define task file schema (markdown with YAML frontmatter)
 - Add assignments registry (e.g. `assignments.json` mapping task -> agent)
 - Provide commands:
-  - `task.create`, `task.list`, `task.assign`, `task.run`, `task.status`
+  - `task.list`, `task.run`, `task.status`, `task.remove`
+  - Task creation/editing handled via agent skill (skills/task.md)
 
 ### 3) CLI surface (pi-agents)
 - Use space-subcommands (e.g. `pi-agents task list`, `pi-agents agent ask`)
 - Commands:
   - `agent create`, `agent list`, `agent ask`
-  - `task create`, `task list`, `task assign`, `task run`, `task status`
+  - `task list`, `task run`, `task status`, `task remove`
+  - task creation/editing via agent skill
 - CLI should call pi executor (RPC/CLI), not wrap pi flags directly
 
 ### 4) RPC backend
@@ -48,7 +50,8 @@
 - 🟡 3) CLI changes (space-subcommands + agent chat/ask)
   - auto-greet extension (first-time vs returning sessions)
   - interactive model picker on agent create
-  - task create/list/run/status ✅
+  - task list/run/status/remove ✅
+  - task creation/editing via agent skill ✅
 - 🟠 4) Runner changes (tasks + assignments wiring)
   - scheduled runs via daemon ❌
   - assignments registry ❌

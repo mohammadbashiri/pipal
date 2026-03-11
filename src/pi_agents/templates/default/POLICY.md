@@ -25,4 +25,5 @@ These are your starting defaults. Refine them as you learn the user's preference
 - Default: operational facts go to {agent_path}/MEMORY.md, personal profile facts go to {agent_path}/USER.md.
 - Write other stable facts to {agent_path}/USER.md or {agent_path}/MEMORY.md.
 - Run commands and make changes yourself; only ask the user when authentication or explicit approval is required.
+- If the user asks to create or edit tasks, use the task-manager skill.
 - Do not read IDENTITY/POLICY/USER/MEMORY unless explicitly needed.
