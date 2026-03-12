@@ -83,11 +83,6 @@ const resolveSummaryPath = (sessionFile?: string | null): string | undefined => 
   return path.join(path.dirname(sessionFile), SUMMARY_FILE_NAME);
 };
 
-const loadSummary = (summaryPath: string): string => {
-  if (!fs.existsSync(summaryPath)) return "";
-  return fs.readFileSync(summaryPath, "utf-8");
-};
-
 const ensureSummaryFile = (summaryPath: string) => {
   if (fs.existsSync(summaryPath)) return;
   fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
@@ -110,6 +105,59 @@ const resolveSessionName = (sessionFile?: string | null) => {
   if (!sessionFile) return undefined;
   const sessionDir = path.dirname(sessionFile);
   return path.basename(sessionDir);
+};
+
+const RECENT_MESSAGES_DEFAULT = 40;
+
+const resolveRecentMessagesLimit = () => {
+  const raw = process.env.PAL_RECENT_MESSAGES;
+  const parsed = raw ? Number.parseInt(raw, 10) : RECENT_MESSAGES_DEFAULT;
+  if (!Number.isFinite(parsed) || parsed <= 0) return RECENT_MESSAGES_DEFAULT;
+  return parsed;
+};
+
+const findPreviousSessionFile = (sessionFile?: string | null): string | undefined => {
+  if (!sessionFile) return undefined;
+  const sessionDir = path.dirname(sessionFile);
+  if (!fs.existsSync(sessionDir)) return undefined;
+
+  const files = fs
+    .readdirSync(sessionDir)
+    .filter((name) => name.endsWith(".jsonl"))
+    .map((name) => path.join(sessionDir, name))
+    .filter((filePath) => path.resolve(filePath) !== path.resolve(sessionFile))
+    .sort((a, b) => b.localeCompare(a));
+
+  return files[0];
+};
+
+const loadRecentMessages = (sessionPath: string, limit: number): string => {
+  const raw = fs.readFileSync(sessionPath, "utf-8");
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  const messages: string[] = [];
+
+  for (let i = lines.length - 1; i >= 0 && messages.length < limit; i -= 1) {
+    let entry: SessionEntry | undefined;
+    try {
+      entry = JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
+
+    if (entry?.type !== "message") continue;
+    const role = entry.message?.role;
+    if (role !== "user" && role !== "assistant") continue;
+
+    const textParts = extractTextParts(entry.message?.content);
+    const messageText = textParts.join("\n").trim();
+    if (!messageText) continue;
+
+    const roleLabel = role === "user" ? "User" : "Assistant";
+    const ts = entry.timestamp ? ` (${entry.timestamp})` : "";
+    messages.push(`${roleLabel}${ts}: ${messageText}`);
+  }
+
+  return messages.reverse().join("\n\n");
 };
 
 export default function (pi: ExtensionAPI) {
@@ -186,23 +234,19 @@ export default function (pi: ExtensionAPI) {
 
     ensureSummaryFile(summaryPath);
     logSummaryEvent(summaryPath, "Summary file ready");
-    if (ctx.hasUI) ctx.ui.notify(`Rolling summary file ready: ${summaryPath}`, "info");
 
-    const summary = loadSummary(summaryPath).trim();
-    if (!summary) return;
+    const previousSession = findPreviousSessionFile(sessionFile);
+    if (!previousSession) return;
+
+    const limit = resolveRecentMessagesLimit();
+    const recentText = loadRecentMessages(previousSession, limit);
+    if (!recentText) return;
 
     ctx.sessionManager.appendCustomMessageEntry(
-      "pal-rolling-summary",
-      summary,
+      "pal-recent-messages",
+      `Recent messages from previous session:\n\n${recentText}`,
       false,
-      { summaryPath }
-    );
-
-    ctx.sessionManager.appendCustomMessageEntry(
-      "pal-rolling-summary-banner",
-      "Loaded rolling summary for this agent. Prior sessions are summarized in summary.md.",
-      true,
-      { summaryPath }
+      { sourceSession: path.basename(previousSession), limit }
     );
   });
 
