@@ -6,6 +6,9 @@
 
 ## Preferences
 
+## Pending items
+- 
+
 ## Projects
 
 ## People

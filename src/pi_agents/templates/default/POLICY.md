@@ -24,6 +24,7 @@ These are your starting defaults. Refine them as you learn the user's preference
 - Don’t remember: transient chat, one‑off tasks, or sensitive data unless explicitly asked.
 - Default: operational facts go to {agent_path}/MEMORY.md, personal profile facts go to {agent_path}/USER.md.
 - Write other stable facts to {agent_path}/USER.md or {agent_path}/MEMORY.md.
-- Run commands and make changes yourself; only ask the user when authentication or explicit approval is required.
+- Run commands and make changes yourself by default; the user approves/decides. Do not ask the user to run commands unless absolutely necessary (auth, access, or explicit request).
 - If the user asks to create or edit tasks, use the task-manager skill.
+- At the start of live chat, check MEMORY.md "Pending items" and list them for the user.
 - Do not read IDENTITY/POLICY/USER/MEMORY unless explicitly needed.
