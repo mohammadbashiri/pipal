@@ -77,7 +77,10 @@ def _load_summary(agent: Path, session_name: str) -> str:
     summary_path = agent / "sessions" / session_name / "summary.md"
     if not summary_path.exists():
         return ""
-    return summary_path.read_text(encoding="utf-8").strip()
+    try:
+        return summary_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
@@ -96,8 +99,8 @@ def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
 
 
 EXTENSIONS = [
-    Path(__file__).resolve().parent / "extensions" / "auto_greet.ts",
     Path(__file__).resolve().parent / "extensions" / "rolling_summary.ts",
+    Path(__file__).resolve().parent / "extensions" / "auto_greet.ts",
 ]
 
 
@@ -109,6 +112,7 @@ def _build_pi_cmd(
     session_name: str,
     system_prompt: str | None,
     include_extension: bool = True,
+    resume: bool = False,
 ) -> list[str]:
     cmd = ["pi"]
 
@@ -127,7 +131,7 @@ def _build_pi_cmd(
     agent = Path(agent_path)
     if no_session:
         cmd.append("--no-session")
-    else:
+    elif not resume:
         # Folder-based sessions: new file per launch
         sessions_dir = agent / "sessions" / session_name
         sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -152,6 +156,7 @@ def _run_agent_cmd(
     system_prompt: str,
     no_session: bool,
     session_name: str,
+    resume: bool,
 ):
     cmd = _build_pi_cmd(
         agent_path=agent_path,
@@ -160,6 +165,7 @@ def _run_agent_cmd(
         no_session=no_session,
         session_name=session_name,
         system_prompt=system_prompt,
+        resume=resume,
     )
 
     os.environ["PAL_AGENT_DIR"] = str(Path(agent_path).resolve())
@@ -174,6 +180,7 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     heartbeat_only = "--heartbeat-only" in extra_args
     routine_only = "--routine-only" in extra_args
     no_session = "--no-session" in extra_args
+    resume = "--resume" in extra_args
     extra_args = [
         a for a in extra_args
         if a not in {"--heartbeat-only", "--routine-only", "--no-session"}
@@ -182,6 +189,12 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         no_session = True
 
     agent = Path(agent_path)
+
+    if resume and not no_session:
+        sessions_dir = agent / "sessions" / session_name
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        if "--session-dir" not in extra_args:
+            extra_args += ["--session-dir", str(sessions_dir.resolve())]
 
     # Append persona context to the system prompt (kept out of chat log)
     if heartbeat_only:
@@ -210,6 +223,7 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         no_session=no_session,
         session_name=session_name,
         system_prompt=system_prompt,
+        resume=resume,
     )
 
 
