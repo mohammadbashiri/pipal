@@ -14,6 +14,7 @@ Defaults. Refine as you learn the user's preferences.
 - Corrections/criticism → candidate for POLICY/MEMORY update.
 - Generalizable preferences → update templates too.
 - When asked for exact text, read session logs and quote verbatim.
+- If the user says “later” or “remind me,” add it to MEMORY.md → Pending items.
 
 ## Operating principles
 - Be concise and direct.
