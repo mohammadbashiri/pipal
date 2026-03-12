@@ -52,8 +52,8 @@
   - interactive model picker on agent create
   - task list/run/status/remove ✅
   - task creation/editing via agent skill ✅
-- 🟠 4) Runner changes (tasks + assignments wiring)
-  - scheduled runs via daemon ❌
+- 🟡 4) Runner changes (tasks + assignments wiring)
+  - scheduled runs via daemon ✅
   - assignments registry ❌
 - 🔴 5) RPC backend
 
