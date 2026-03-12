@@ -12,9 +12,11 @@ type ContentBlock = {
 
 type SessionEntry = {
   type: string;
+  timestamp?: string | number;
   message?: {
     role?: string;
     content?: unknown;
+    timestamp?: string | number;
   };
 };
 
@@ -107,6 +109,14 @@ const resolveSessionName = (sessionFile?: string | null) => {
   return path.basename(sessionDir);
 };
 
+const resolveEntryTimestamp = (entry: SessionEntry): string | undefined => {
+  const raw = entry.timestamp ?? entry.message?.timestamp;
+  if (raw === undefined || raw === null) return undefined;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return String(raw);
+  return date.toISOString();
+};
+
 const RECENT_MESSAGES_DEFAULT = 40;
 
 const resolveRecentMessagesLimit = () => {
@@ -132,7 +142,15 @@ const findPreviousSessionFile = (sessionFile?: string | null): string | undefine
 };
 
 const loadRecentMessages = (sessionPath: string, limit: number): string => {
-  const raw = fs.readFileSync(sessionPath, "utf-8");
+  if (!fs.existsSync(sessionPath)) return "";
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(sessionPath, "utf-8");
+  } catch {
+    return "";
+  }
+
   const lines = raw.split(/\r?\n/).filter(Boolean);
   const messages: string[] = [];
 
@@ -153,11 +171,32 @@ const loadRecentMessages = (sessionPath: string, limit: number): string => {
     if (!messageText) continue;
 
     const roleLabel = role === "user" ? "User" : "Assistant";
-    const ts = entry.timestamp ? ` (${entry.timestamp})` : "";
-    messages.push(`${roleLabel}${ts}: ${messageText}`);
+    const ts = resolveEntryTimestamp(entry);
+    const tsLabel = ts ? ` (${ts})` : "";
+    messages.push(`${roleLabel}${tsLabel}: ${messageText}`);
   }
 
   return messages.reverse().join("\n\n");
+};
+
+const loadLastEntryType = (sessionPath?: string | null): string | undefined => {
+  if (!sessionPath || !fs.existsSync(sessionPath)) return undefined;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(sessionPath, "utf-8");
+  } catch {
+    return undefined;
+  }
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      const entry = JSON.parse(lines[i]);
+      return entry?.type;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 };
 
 export default function (pi: ExtensionAPI) {
@@ -166,15 +205,23 @@ export default function (pi: ExtensionAPI) {
     const summaryPath = resolveSummaryPath(sessionFile);
     if (!summaryPath) return;
 
-    const entries = ctx.sessionManager.getBranch();
-    const conversationText = buildConversationText(entries as SessionEntry[]);
-    if (!conversationText.trim()) return;
-
     const agentName = resolveAgentName();
     const sessionName = resolveSessionName(sessionFile);
     if (!agentName || !sessionName) {
       logSummaryEvent(summaryPath, "Summarize skipped (missing agent/session name)");
       if (ctx.hasUI) ctx.ui.notify("Rolling summary: skipped (missing agent/session)", "warning");
+      return;
+    }
+
+    const hasMessages = ctx
+      .sessionManager
+      .getEntries()
+      .some((entry: SessionEntry) =>
+        entry.type === "message" &&
+        (entry.message?.role === "user" || entry.message?.role === "assistant")
+      );
+    if (!hasMessages) {
+      logSummaryEvent(summaryPath, "Summarize skipped (no messages)");
       return;
     }
 
@@ -198,6 +245,18 @@ export default function (pi: ExtensionAPI) {
     }
 
     try {
+      const lastEntryType = loadLastEntryType(sessionFile);
+      if (lastEntryType !== "compaction") {
+        logSummaryEvent(summaryPath, "Compaction start (session shutdown)");
+        await new Promise<void>((resolve, reject) => {
+          ctx.compact({
+            onComplete: () => resolve(),
+            onError: (error) => reject(error),
+          });
+        });
+        logSummaryEvent(summaryPath, "Compaction complete (session shutdown)");
+      }
+
       const result = await pi.exec("pal", [
         "session",
         "summarize",
@@ -250,12 +309,40 @@ export default function (pi: ExtensionAPI) {
     );
   });
 
-  pi.on("turn_end", async (_event, ctx) => {
-    if (ctx.hasUI) return; // print/json mode
-    await writeSummary(ctx);
-  });
-
   pi.on("session_shutdown", async (_event, ctx) => {
+    if (!ctx.hasUI) {
+      await writeSummary(ctx);
+      return;
+    }
+
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const summaryPath = resolveSummaryPath(sessionFile);
+    const hasMessages = ctx
+      .sessionManager
+      .getEntries()
+      .some((entry: SessionEntry) =>
+        entry.type === "message" &&
+        (entry.message?.role === "user" || entry.message?.role === "assistant")
+      );
+
+    if (!hasMessages) {
+      await writeSummary(ctx);
+      return;
+    }
+
+    const confirmed = await ctx.ui.confirm(
+      "Update rolling summary?",
+      "This will compact the session and update summary.md for this session."
+    );
+
+    if (!confirmed) {
+      if (summaryPath) {
+        logSummaryEvent(summaryPath, "Summarize skipped (user declined)");
+      }
+      ctx.ui.notify("Rolling summary: skipped", "info");
+      return;
+    }
+
     await writeSummary(ctx);
   });
 }
