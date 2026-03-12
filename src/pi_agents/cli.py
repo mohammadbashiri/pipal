@@ -3,7 +3,7 @@ from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
-from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pal_dir
+from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pipal_dir
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
@@ -24,7 +24,7 @@ from .tasks import (
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="pal", add_help=True)
+    p = argparse.ArgumentParser(prog="pipal", add_help=True)
     sub = p.add_subparsers(dest="cmd")
 
     pa = sub.add_parser("agent", help="Manage agents")
@@ -116,7 +116,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
 
     if migrate_registry():
-        print("[green]Migrated[/green] agent registry to ~/.pal/agents.json")
+        print("[green]Migrated[/green] agent registry to ~/.pipal/agents.json")
 
     args = build_parser().parse_args(argv)
 
@@ -124,7 +124,7 @@ def main(argv=None):
         if args.session_cmd == "list":
             agent = get_agent(args.agent)
             if not agent:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                 return 2
 
             sessions_root = Path(agent["path"]) / "sessions"
@@ -144,13 +144,13 @@ def main(argv=None):
         if args.session_cmd == "summarize":
             agent = get_agent(args.agent)
             if not agent:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                 return 2
 
             llm = load_llm_config(agent["path"])
             if not llm:
                 print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pal agent set-llm {args.agent} "provider:model"')
+                print(f'  pipal agent set-llm {args.agent} "provider:model"')
                 return 2
 
             result = summarize_session(Path(agent["path"]), args.session_name, llm)
@@ -166,7 +166,7 @@ def main(argv=None):
         if args.session_cmd == "remove":
             agent = get_agent(args.agent)
             if not agent:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                 return 2
 
             session_dir = Path(agent["path"]) / "sessions" / args.session_name
@@ -194,7 +194,7 @@ def main(argv=None):
             if args.agent:
                 agent = get_agent(args.agent)
                 if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                     return 2
                 root = task_root_personal(agent["path"])
                 tasks = list_tasks(root)
@@ -224,7 +224,7 @@ def main(argv=None):
             if args.agent:
                 agent = get_agent(args.agent)
                 if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                     return 2
                 root = task_root_personal(agent["path"])
             else:
@@ -248,13 +248,13 @@ def main(argv=None):
                     return 2
                 agent = get_agent(assigned_to)
                 if not agent:
-                    print(f"[red]Unknown agent[/red] {assigned_to}. Run: pal agent list")
+                    print(f"[red]Unknown agent[/red] {assigned_to}. Run: pipal agent list")
                     return 2
 
             llm = load_llm_config(agent["path"])
             if not llm:
                 print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pal agent set-llm {agent["name"]} "provider:model"')
+                print(f'  pipal agent set-llm {agent["name"]} "provider:model"')
                 return 2
 
             llm_run = dict(llm)
@@ -293,7 +293,7 @@ def main(argv=None):
             if args.agent:
                 agent = get_agent(args.agent)
                 if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                     return 2
                 tasks = list_tasks(task_root_personal(agent["path"]))
                 entries.extend(("personal", agent["name"], name, path) for name, path in tasks)
@@ -363,7 +363,7 @@ def main(argv=None):
             if args.agent:
                 agent = get_agent(args.agent)
                 if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                     return 2
                 root = task_root_personal(agent["path"])
             elif args.global_only:
@@ -391,13 +391,13 @@ def main(argv=None):
 
     if args.cmd == "agent":
         if args.agent_cmd == "create":
-            base = args.path or str(pal_dir() / "agents")
+            base = args.path or str(pipal_dir() / "agents")
             path = str((Path(base) / args.name).expanduser().resolve())
             Path(path).mkdir(parents=True, exist_ok=True)
 
             res = add_agent(args.name, path)  # should auto-create registry
             if isinstance(res, dict) and res.get("registry_created"):
-                print("[green]Created[/green] ~/.pal/agents.json")
+                print("[green]Created[/green] ~/.pipal/agents.json")
                 print(f"[green]Registered[/green] {args.name} → {res['path']}")
             else:
                 # if your add_agent returns just a path string
@@ -444,13 +444,13 @@ def main(argv=None):
         if args.agent_cmd == "chat":
             a = get_agent(args.name)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.name}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.name}. Run: pipal agent list")
                 return 2
 
             llm = load_llm_config(a["path"])
             if not llm:
                 print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pal agent set-llm {args.name} "provider:model"')
+                print(f'  pipal agent set-llm {args.name} "provider:model"')
                 return 2
 
             extra_args = args.args or []
@@ -460,13 +460,13 @@ def main(argv=None):
         if args.agent_cmd == "ask":
             a = get_agent(args.name)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.name}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.name}. Run: pipal agent list")
                 return 2
 
             llm = load_llm_config(a["path"])
             if not llm:
                 print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pal agent set-llm {args.name} "provider:model"')
+                print(f'  pipal agent set-llm {args.name} "provider:model"')
                 return 2
 
             prompt = args.prompt or []
@@ -476,7 +476,7 @@ def main(argv=None):
                 prompt = prompt[1:]
 
             if not prompt:
-                print("[red]Missing prompt.[/red] Usage: pal agent ask <name> \"...\"")
+                print("[red]Missing prompt.[/red] Usage: pipal agent ask <name> \"...\"")
                 return 2
 
             if print_only:
@@ -491,7 +491,7 @@ def main(argv=None):
         if args.agent_cmd == "set-llm":
             a = get_agent(args.name)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.name}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.name}. Run: pipal agent list")
                 return 2
 
             ensure_agent_scaffold(a["path"], name=args.name)
@@ -508,8 +508,8 @@ def main(argv=None):
 
             if not provider or not model:
                 print("[red]Missing model info.[/red] Use either:")
-                print(f'  pal agent set-llm {args.name} --provider ollama --model "Mistral:7b"')
-                print(f'  pal agent set-llm {args.name} "ollama:Mistral:7b"')
+                print(f'  pipal agent set-llm {args.name} --provider ollama --model "Mistral:7b"')
+                print(f'  pipal agent set-llm {args.name} "ollama:Mistral:7b"')
                 return 2
 
             written = write_llm_json(a["path"], provider, model)
@@ -521,7 +521,7 @@ def main(argv=None):
         if args.daemon_cmd == "start":
             a = get_agent(args.agent)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                 return 2
             try:
                 interval = parse_interval(args.every)
@@ -545,7 +545,7 @@ def main(argv=None):
         if args.daemon_cmd == "stop":
             a = get_agent(args.agent)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                 return 2
             if stop_daemon(a["path"]):
                 print(f"[green]Stopped[/green] daemon for [bold]{args.agent}[/bold]")
@@ -561,7 +561,7 @@ def main(argv=None):
             if args.agent:
                 agents = {args.agent: get_agent(args.agent)}
                 if not agents[args.agent]:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                     return 2
             else:
                 agents = list_agents()
@@ -593,7 +593,7 @@ def main(argv=None):
         if args.daemon_cmd == "logs":
             a = get_agent(args.agent)
             if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
                 return 2
             output = daemon_logs(a["path"], lines=args.n)
             if output:
@@ -602,7 +602,7 @@ def main(argv=None):
                 print("[yellow]No logs yet[/yellow]")
             return 0
 
-    print("[yellow]Tip:[/yellow] use `pal agent ...`")
+    print("[yellow]Tip:[/yellow] use `pipal agent ...`")
     return 0
 
 def parse_llm_spec(spec: str):

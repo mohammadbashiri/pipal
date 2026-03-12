@@ -190,7 +190,7 @@ def _run_loop(
                     try:
                         result = subprocess.run(
                             [
-                                uv_bin, "run", "pal",
+                                uv_bin, "run", "pipal",
                                 "task", "run",
                                 task_id,
                                 "--agent", agent_name,

@@ -8,15 +8,25 @@ const INTRO_GREET_INSTRUCTION =
 const RETURN_GREET_INSTRUCTION =
   "Begin the conversation now. Greet the user briefly as someone you already know. Do not re-introduce yourself or ask for names. Ask what they'd like to do or talk about.";
 
+function resolveInitMarker(agentDir?: string | null) {
+  if (!agentDir) return undefined;
+  const newMarker = path.join(agentDir, ".pipal_initialized");
+  const oldMarker = path.join(agentDir, ".pal_initialized");
+
+  if (fs.existsSync(newMarker)) return newMarker;
+  if (fs.existsSync(oldMarker)) return oldMarker;
+  return newMarker;
+}
+
 function isFirstEver(agentDir?: string | null) {
-  if (!agentDir) return true;
-  const marker = path.join(agentDir, ".pal_initialized");
+  const marker = resolveInitMarker(agentDir);
+  if (!marker) return true;
   return !fs.existsSync(marker);
 }
 
 function markInitialized(agentDir?: string | null) {
-  if (!agentDir) return;
-  const marker = path.join(agentDir, ".pal_initialized");
+  const marker = resolveInitMarker(agentDir);
+  if (!marker) return;
   if (!fs.existsSync(marker)) {
     fs.writeFileSync(marker, "initialized\n", "utf-8");
   }
@@ -24,15 +34,17 @@ function markInitialized(agentDir?: string | null) {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
-    if (process.env.PAL_DISABLE_AUTOGREET === "1") return;
+    if (process.env.PIPAL_DISABLE_AUTOGREET === "1") return;
 
-    const agentDir = process.env.PAL_AGENT_DIR;
+    const agentDir = process.env.PIPAL_AGENT_DIR;
     const firstEver = isFirstEver(agentDir);
 
     const entries = ctx.sessionManager.getEntries();
     const hasMessages = entries.some((entry) => entry.type === "message");
     const hasGreet = entries.some(
-      (entry) => entry.type === "custom_message" && entry.customType === "pal-autogreet"
+      (entry) =>
+        entry.type === "custom_message" &&
+        (entry.customType === "pipal-autogreet" || entry.customType === "pal-autogreet")
     );
 
     if (hasMessages || hasGreet) return;
@@ -43,7 +55,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.sendMessage(
       {
-        customType: "pal-autogreet",
+        customType: "pipal-autogreet",
         content: firstEver ? INTRO_GREET_INSTRUCTION : RETURN_GREET_INSTRUCTION,
         display: false,
       },
