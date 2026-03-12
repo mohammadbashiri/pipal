@@ -168,7 +168,7 @@ def _run_agent_cmd(
         resume=resume,
     )
 
-    os.environ["PAL_AGENT_DIR"] = str(Path(agent_path).resolve())
+    os.environ["PIPAL_AGENT_DIR"] = str(Path(agent_path).resolve())
     pi_bin = _find_native_pi()
     os.execv(pi_bin, cmd)
 
@@ -251,8 +251,8 @@ def run_agent_print(
     )
 
     env = os.environ.copy()
-    env["PAL_AGENT_DIR"] = str(agent.resolve())
-    env["PAL_DISABLE_AUTOGREET"] = "1"
+    env["PIPAL_AGENT_DIR"] = str(agent.resolve())
+    env["PIPAL_DISABLE_AUTOGREET"] = "1"
 
     pi_bin = _find_native_pi()
     result = subprocess.run(

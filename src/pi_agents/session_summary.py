@@ -205,8 +205,8 @@ def _resolve_latest_session_file(session_dir: Path) -> Path | None:
 
 
 def _resolve_summary_model(llm_config: dict[str, Any]) -> tuple[str | None, str | None]:
-    provider = os.getenv("PAL_SUMMARY_PROVIDER") or llm_config.get("provider")
-    model = os.getenv("PAL_SUMMARY_MODEL") or llm_config.get("model")
+    provider = os.getenv("PIPAL_SUMMARY_PROVIDER") or llm_config.get("provider")
+    model = os.getenv("PIPAL_SUMMARY_MODEL") or llm_config.get("model")
     return provider, model
 
 

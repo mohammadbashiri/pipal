@@ -29,7 +29,7 @@
 **Approach:** Define self-improvement as an agent-specific routine and run it on a schedule.
 
 **Mechanism:**
-- Personal routines live in `~/.pal/agents/<name>/routines/`.
+- Personal routines live in `~/.pipal/agents/<name>/routines/`.
 - Use the daemon/heartbeat to execute routines at regular intervals.
 - Each run produces a one-line result (`ROUTINE_OK`/`ROUTINE_FAIL`) and is logged.
 

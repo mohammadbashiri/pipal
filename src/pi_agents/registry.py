@@ -1,8 +1,25 @@
-import json, os
+import json, os, shutil
 from pathlib import Path
 
-def pal_dir(): return Path(os.environ.get("PAL_HOME", Path.home() / ".pal"))
-def registry_path(): return pal_dir() / "agents.json"
+
+def _maybe_migrate_legacy_home() -> None:
+    if os.environ.get("PIPAL_HOME"):
+        return
+    new_base = Path.home() / ".pipal"
+    old_base = Path.home() / ".pal"
+    if new_base.exists() or not old_base.exists():
+        return
+    try:
+        shutil.move(str(old_base), str(new_base))
+    except OSError:
+        return
+
+
+def pipal_dir():
+    _maybe_migrate_legacy_home()
+    return Path(os.environ.get("PIPAL_HOME", Path.home() / ".pipal"))
+
+def registry_path(): return pipal_dir() / "agents.json"
 
 def legacy_registry_path():
     return Path(os.environ.get("PI_HOME", Path.home() / ".pi")) / "agents.json"
@@ -17,12 +34,50 @@ def migrate_registry():
     return True
 
 
+def _rewrite_registry_paths(reg: dict) -> bool:
+    agents = reg.get("agents", {})
+    if not isinstance(agents, dict):
+        return False
+    old_base = Path.home() / ".pal"
+    new_base = Path.home() / ".pipal"
+    old_prefix = str(old_base.resolve())
+    new_prefix = str(new_base.resolve())
+
+    changed = False
+    for name, entry in list(agents.items()):
+        if isinstance(entry, str):
+            path = entry
+            entry_container = None
+        elif isinstance(entry, dict):
+            path = entry.get("path")
+            entry_container = entry
+        else:
+            continue
+
+        if not isinstance(path, str):
+            continue
+
+        if path.startswith(old_prefix):
+            updated = new_prefix + path[len(old_prefix):]
+            if entry_container is not None:
+                entry_container["path"] = updated
+                agents[name] = entry_container
+            else:
+                agents[name] = updated
+            changed = True
+
+    return changed
+
+
 def load_registry():
     migrate_registry()
     p = registry_path()
     if not p.exists(): return {"agents": {}}
     with p.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        reg = json.load(f)
+    if _rewrite_registry_paths(reg):
+        save_registry(reg)
+    return reg
 
 def save_registry(reg):
     p = registry_path()

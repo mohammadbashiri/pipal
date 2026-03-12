@@ -98,7 +98,7 @@ const logSummaryEvent = (summaryPath: string, message: string) => {
 };
 
 const resolveAgentName = () => {
-  const agentDir = process.env.PAL_AGENT_DIR;
+  const agentDir = process.env.PIPAL_AGENT_DIR;
   if (!agentDir) return undefined;
   return path.basename(agentDir);
 };
@@ -120,7 +120,7 @@ const resolveEntryTimestamp = (entry: SessionEntry): string | undefined => {
 const RECENT_MESSAGES_DEFAULT = 40;
 
 const resolveRecentMessagesLimit = () => {
-  const raw = process.env.PAL_RECENT_MESSAGES;
+  const raw = process.env.PIPAL_RECENT_MESSAGES;
   const parsed = raw ? Number.parseInt(raw, 10) : RECENT_MESSAGES_DEFAULT;
   if (!Number.isFinite(parsed) || parsed <= 0) return RECENT_MESSAGES_DEFAULT;
   return parsed;
@@ -257,7 +257,7 @@ export default function (pi: ExtensionAPI) {
         logSummaryEvent(summaryPath, "Compaction complete (session shutdown)");
       }
 
-      const result = await pi.exec("pal", [
+      const result = await pi.exec("pipal", [
         "session",
         "summarize",
         "--agent",
@@ -302,7 +302,7 @@ export default function (pi: ExtensionAPI) {
     if (!recentText) return;
 
     ctx.sessionManager.appendCustomMessageEntry(
-      "pal-recent-messages",
+      "pipal-recent-messages",
       `Recent messages from previous session:\n\n${recentText}`,
       false,
       { sourceSession: path.basename(previousSession), limit }

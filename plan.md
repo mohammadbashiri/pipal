@@ -4,7 +4,7 @@
 - Refactor agent definition to minimal identity/policy/memory
 - Add task + assignment abstractions
 - Implement RPC backend for headless runs
-- Replace direct `pi` wrapper with `pal` CLI commands
+- Replace direct `pi` wrapper with `pipal` CLI commands
 
 ## Changes
 ### 1) Agent definition (minimal)
@@ -13,7 +13,7 @@
 - Optional: journal for audit trail
 
 ### 2) Tasks + assignments
-- Add global tasks under `~/.pal/tasks` and personal tasks under `<agent>/tasks`
+- Add global tasks under `~/.pipal/tasks` and personal tasks under `<agent>/tasks`
 - Define task file schema (markdown with YAML frontmatter)
 - Add assignments registry (e.g. `assignments.json` mapping task -> agent)
 - Provide commands:
@@ -46,17 +46,17 @@
 ## Decisions
 - Task file format: Markdown + YAML frontmatter
 - Assignments registry: repo-root `assignments.json`
-- Task storage: global tasks in `~/.pal/tasks`, personal tasks in `<agent>/tasks`
+- Task storage: global tasks in `~/.pipal/tasks`, personal tasks in `<agent>/tasks`
 - Agent files: uppercase (AGENTS/IDENTITY/POLICY/USER/MEMORY/JOURNAL)
 - Run summaries: per-task log file (e.g. `tasks/<id>/runs.log`)
-- Default storage: `~/.pal/agents/<name>` + `~/.pal/agents.json`, allow custom paths
+- Default storage: `~/.pipal/agents/<name>` + `~/.pipal/agents.json`, allow custom paths
 
 ## Chunks (status)
 - 🟡 1) Schema + templates (agents/tasks/assignments)
   - uppercase files + AGENTS/USER ✅
   - first-run behavior + autonomy + memory rules ✅
   - task.md template + output format ✅
-- 🟡 2) Rename CLI to `pal`
+- 🟡 2) Rename CLI to `pipal`
 - 🟡 3) CLI changes (space-subcommands + agent chat/ask)
   - auto-greet extension (first-time vs returning sessions)
   - interactive model picker on agent create

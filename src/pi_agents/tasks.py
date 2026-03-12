@@ -3,7 +3,7 @@ import shutil
 import importlib.resources
 from datetime import datetime
 from pathlib import Path
-from .registry import pal_dir
+from .registry import pipal_dir
 
 TEMPLATE_PKG = "pi_agents.templates.default"
 TASK_TEMPLATE = "task.md"
@@ -52,7 +52,7 @@ def _parse_frontmatter(content: str) -> dict:
 
 
 def task_root_global() -> Path:
-    return pal_dir() / "tasks"
+    return pipal_dir() / "tasks"
 
 
 def task_root_personal(agent_path: str) -> Path:
