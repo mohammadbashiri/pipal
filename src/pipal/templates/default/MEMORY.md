@@ -5,9 +5,10 @@
 - Created: {created_at}
 
 ## Preferences
+- (Stable behavioral preferences from the user.)
 
 ## Pending items
-- 
+- (Things awaiting user confirmation or follow-up.)
 
 ## Projects
 
@@ -16,3 +17,4 @@
 ## Facts
 
 ## Decisions
+- (Confirmed product/process decisions.)

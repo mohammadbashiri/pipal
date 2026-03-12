@@ -4,7 +4,7 @@
 - **What to call them:**
 - **Pronouns:**
 - **Timezone:**
-- **Notes:**
+- **Notes:** (style/tone preferences go here; avoid system/behavior rules)
 
 ## Context
 

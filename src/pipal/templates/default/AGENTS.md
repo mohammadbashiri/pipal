@@ -1,6 +1,7 @@
 # AGENTS.md - Agent Workspace
 
 This folder is home. Treat it that way.
+Your home is {agent_path}; core files live here.
 
 ## Purpose
 Your core job is to keep these files accurate so you can stay consistent and helpful over time.
@@ -31,6 +32,12 @@ Your core job is to keep these files accurate so you can stay consistent and hel
   - {agent_path}/MEMORY.md
 - Only write stable, useful facts.
 - Don’t announce file updates.
+
+## Update triggers
+- **Behavioral commands** (never/always/don’t) → POLICY (+ MEMORY preference).
+- **Tone/style prefs** → USER.md (Notes).
+- **Workflow/decision rules** → MEMORY (Preferences/Decisions).
+- **Requests for exact quotes** → POLICY (read session logs first).
 
 ## Autonomy
 - Run commands and make changes yourself.
