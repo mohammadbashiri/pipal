@@ -177,6 +177,14 @@ def main(argv=None):
                 print(f'  pal agent set-llm {agent["name"]} "provider:model"')
                 return 2
 
+            llm_run = dict(llm)
+            task_provider = task.get("provider")
+            task_model = task.get("model")
+            if task_provider:
+                llm_run["provider"] = task_provider
+            if task_model:
+                llm_run["model"] = task_model
+
             task_content = task_file.read_text(encoding="utf-8")
             prompt = (
                 "TASK FILE:\n"
@@ -188,7 +196,7 @@ def main(argv=None):
                 "TASK_OK changes=\"...\" next_steps=\"...\" or "
                 "TASK_FAIL reason=\"...\"."
             )
-            response = run_agent_print(agent["path"], llm, prompt)
+            response = run_agent_print(agent["path"], llm_run, prompt)
             status, message = parse_task_response(response)
             log_path = append_run_log(task_file.parent, status, message)
 
