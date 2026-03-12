@@ -1,4 +1,4 @@
-"""Daemon process for pi-agents heartbeat.
+"""Daemon process for pipal heartbeat.
 
 Runs as a detached background process.  Wakes up on interval,
 invokes the agent non-interactively to run its heartbeat checklist,
@@ -259,7 +259,7 @@ def start_daemon(agent_name: str, agent_path: str, interval: int):
 
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "pi_agents.daemon",
+            sys.executable, "-m", "pipal.daemon",
             "--agent-name", agent_name,
             "--agent-path", agent_path,
             "--interval", str(interval),

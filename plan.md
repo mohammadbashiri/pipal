@@ -20,8 +20,8 @@
   - `task.list`, `task.run`, `task.status`, `task.remove`
   - Task creation/editing handled via agent skill (skills/task.md)
 
-### 3) CLI surface (pi-agents)
-- Use space-subcommands (e.g. `pi-agents task list`, `pi-agents agent ask`)
+### 3) CLI surface (pipal)
+- Use space-subcommands (e.g. `pipal task list`, `pipal agent ask`)
 - Commands:
   - `agent create`, `agent list`, `agent ask`
   - `task list`, `task run`, `task status`, `task remove`
