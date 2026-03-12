@@ -17,6 +17,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .tasks import list_tasks, load_task, is_task_due, schedule_seconds
+
 
 # ── paths ────────────────────────────────────────────────────────
 
@@ -171,45 +173,50 @@ def _run_loop(
 
             now = datetime.now().isoformat()
             print(f"\n[{now}] Heartbeat tick", flush=True)
-            routines = _routine_files(agent_path)
-            if not routines:
-                print("HEARTBEAT_OK (no routines found)", flush=True)
+            tasks_root = Path(agent_path) / "tasks"
+            tasks = list_tasks(tasks_root)
+            if not tasks:
+                print("HEARTBEAT_OK (no tasks found)", flush=True)
             else:
-                for routine in routines:
-                    print(f"Running routine: {routine.name}", flush=True)
+                due_any = False
+                for task_id, task_file in tasks:
+                    task = load_task(task_file)
+                    if not is_task_due(task, task_file.parent, now=datetime.fromisoformat(now)):
+                        continue
+                    due_any = True
+                    every = schedule_seconds(task.get("schedule"))
+                    every_label = format_interval(every) if every else "unknown"
+                    print(f"Running task: {task_id} (every {every_label})", flush=True)
                     try:
                         result = subprocess.run(
                             [
-                                uv_bin, "run", "pi",
+                                uv_bin, "run", "pal",
+                                "task", "run",
+                                task_id,
                                 "--agent", agent_name,
-                                "--routine-only",
-                                "--no-session",
-                                "--print",
-                                f"@{routine.resolve()}",
-                                "Execute only the attached routine file. "
-                                "Use tools/files as needed to complete it. "
-                                "Reply in exactly one line: "
-                                "ROUTINE_OK <brief report> or ROUTINE_FAIL <brief reason>.",
                             ],
                             cwd=project_root,
                             capture_output=True,
                             text=True,
-                            timeout=300,  # 5 min max per routine
+                            timeout=300,  # 5 min max per task
                         )
 
                         output = (result.stdout or "").strip()
                         if output:
                             print(output, flush=True)
                         else:
-                            print("ROUTINE_FAIL No output from routine run", flush=True)
+                            print("TASK_FAIL No output from task run", flush=True)
 
                         if result.stderr:
                             print(result.stderr, flush=True)
                     except subprocess.TimeoutExpired:
                         print(
-                            f"ROUTINE_FAIL {routine.name} timed out after 300s",
+                            f"TASK_FAIL {task_id} timed out after 300s",
                             flush=True,
                         )
+
+                if not due_any:
+                    print("HEARTBEAT_OK (no due tasks)", flush=True)
 
             # Update last heartbeat
             meta["last_heartbeat"] = now

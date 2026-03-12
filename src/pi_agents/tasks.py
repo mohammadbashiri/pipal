@@ -140,6 +140,60 @@ def last_run(task_dir: Path) -> dict | None:
     return {"timestamp": timestamp, "status": status, "message": message}
 
 
+def schedule_seconds(schedule: str | None) -> int | None:
+    if not schedule:
+        return None
+    s = schedule.strip().lower()
+    if s.startswith("every "):
+        s = s[len("every "):].strip()
+
+    aliases = {
+        "minute": "1m",
+        "minutes": "1m",
+        "hour": "1h",
+        "hours": "1h",
+        "day": "1d",
+        "days": "1d",
+        "week": "1w",
+        "weeks": "1w",
+    }
+    s = aliases.get(s, s)
+
+    m = re.fullmatch(r"(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", s)
+    if not m or not any(m.groups()):
+        return None
+
+    weeks, days, hours, minutes, seconds = [int(x or 0) for x in m.groups()]
+    total = weeks * 604800 + days * 86400 + hours * 3600 + minutes * 60 + seconds
+    return total or None
+
+
+def _is_enabled(task: dict) -> bool:
+    val = task.get("enabled")
+    if val is None:
+        return True
+    if isinstance(val, str):
+        return val.strip().lower() not in {"false", "0", "no", "off"}
+    return bool(val)
+
+
+def is_task_due(task: dict, task_dir: Path, now: datetime | None = None) -> bool:
+    if not _is_enabled(task):
+        return False
+    seconds = schedule_seconds(task.get("schedule"))
+    if not seconds:
+        return False
+    last = last_run(task_dir)
+    if not last:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last["timestamp"])
+    except ValueError:
+        return True
+    now_dt = now or datetime.now()
+    return (now_dt - last_dt).total_seconds() >= seconds
+
+
 def _parse_kv_pairs(payload: str) -> dict:
     pairs = {}
     for match in re.finditer(r"(\w+)\s*=\s*\"(.*?)\"", payload):

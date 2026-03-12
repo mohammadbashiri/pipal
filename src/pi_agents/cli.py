@@ -86,7 +86,8 @@ def build_parser():
     pd_stop.add_argument("--agent", required=True, help="Agent name")
 
     pd_status = dsub.add_parser("status", help="Check daemon status")
-    pd_status.add_argument("--agent", required=True, help="Agent name")
+    pd_status.add_argument("--agent", default=None, help="Agent name")
+    pd_status.add_argument("--all", action="store_true", help="Show status for all agents")
 
     pd_logs = dsub.add_parser("logs", help="Show daemon logs")
     pd_logs.add_argument("--agent", required=True, help="Agent name")
@@ -465,25 +466,40 @@ def main(argv=None):
             return 0
 
         if args.daemon_cmd == "status":
-            a = get_agent(args.agent)
-            if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+            if args.agent and args.all:
+                print("[red]Use either --agent or --all, not both.[/red]")
                 return 2
-            st = daemon_status(a["path"])
-            if not st:
-                print(f"{args.agent} daemon: [yellow]stopped[/yellow]")
-                return 0
-            print(f"{args.agent} daemon: [green]running[/green]")
-            print(f"  PID:            {st['pid']}")
-            if st.get('started_at'):
-                print(f"  uptime:         {format_uptime(st['started_at'])}")
-            if st.get('interval'):
-                print(f"  interval:       {format_interval(st['interval'])}")
-            if st.get('last_heartbeat'):
-                print(f"  last heartbeat: {st['last_heartbeat']}")
+
+            if args.agent:
+                agents = {args.agent: get_agent(args.agent)}
+                if not agents[args.agent]:
+                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                    return 2
             else:
-                print(f"  last heartbeat: (none yet)")
-            print(f"  log:            {st['log']}")
+                agents = list_agents()
+                if not agents:
+                    print("[yellow]No agents registered[/yellow]")
+                    return 0
+
+            for name, path in agents.items():
+                a_path = path if isinstance(path, str) else path.get("path")
+                if not a_path:
+                    continue
+                st = daemon_status(a_path)
+                if not st:
+                    print(f"{name} daemon: [yellow]stopped[/yellow]")
+                    continue
+                print(f"{name} daemon: [green]running[/green]")
+                print(f"  PID:            {st['pid']}")
+                if st.get('started_at'):
+                    print(f"  uptime:         {format_uptime(st['started_at'])}")
+                if st.get('interval'):
+                    print(f"  interval:       {format_interval(st['interval'])}")
+                if st.get('last_heartbeat'):
+                    print(f"  last heartbeat: {st['last_heartbeat']}")
+                else:
+                    print(f"  last heartbeat: (none yet)")
+                print(f"  log:            {st['log']}")
             return 0
 
         if args.daemon_cmd == "logs":
