@@ -8,6 +8,7 @@ from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
 from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
+from .session_summary import summarize_session
 from .tasks import (
     list_tasks,
     load_task,
@@ -52,6 +53,22 @@ def build_parser():
     p_set.add_argument("spec", nargs="?", default=None, help='Either "provider:model" or omit to use flags')
     p_set.add_argument("--provider", default=None)
     p_set.add_argument("--model", default=None)
+
+    # ── session subcommands ──
+    ps = sub.add_parser("session", help="Manage sessions")
+    ssub = ps.add_subparsers(dest="session_cmd")
+
+    s_list = ssub.add_parser("list", help="List sessions for an agent")
+    s_list.add_argument("--agent", required=True, help="Agent name")
+
+    s_sum = ssub.add_parser("summarize", help="Summarize the latest session into summary.md")
+    s_sum.add_argument("--agent", required=True, help="Agent name")
+    s_sum.add_argument("--session", dest="session_name", default=None, help="Session name (defaults to main)")
+
+    s_remove = ssub.add_parser("remove", help="Remove a session folder")
+    s_remove.add_argument("--agent", required=True, help="Agent name")
+    s_remove.add_argument("--session", dest="session_name", required=True, help="Session name to remove")
+    s_remove.add_argument("--yes", action="store_true", help="Skip confirmation")
 
     # ── task subcommands ──
     pt = sub.add_parser("task", help="Manage tasks")
@@ -102,6 +119,69 @@ def main(argv=None):
         print("[green]Migrated[/green] agent registry to ~/.pal/agents.json")
 
     args = build_parser().parse_args(argv)
+
+    if args.cmd == "session":
+        if args.session_cmd == "list":
+            agent = get_agent(args.agent)
+            if not agent:
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                return 2
+
+            sessions_root = Path(agent["path"]) / "sessions"
+            if not sessions_root.exists():
+                print("[yellow]No sessions found[/yellow]")
+                return 0
+
+            session_names = sorted(p.name for p in sessions_root.iterdir() if p.is_dir())
+            if not session_names:
+                print("[yellow]No sessions found[/yellow]")
+                return 0
+
+            for name in session_names:
+                print(f"- {name}")
+            return 0
+
+        if args.session_cmd == "summarize":
+            agent = get_agent(args.agent)
+            if not agent:
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                return 2
+
+            llm = load_llm_config(agent["path"])
+            if not llm:
+                print("[yellow]No llm.json found. Run:[/yellow]")
+                print(f'  pal agent set-llm {args.agent} "provider:model"')
+                return 2
+
+            result = summarize_session(Path(agent["path"]), args.session_name, llm)
+            if result.status == "OK":
+                print(f"[green]OK[/green] {result.message}")
+                return 0
+            if result.status == "SKIP":
+                print(f"[yellow]SKIP[/yellow] {result.message}")
+                return 0
+            print(f"[red]FAIL[/red] {result.message}")
+            return 2
+
+        if args.session_cmd == "remove":
+            agent = get_agent(args.agent)
+            if not agent:
+                print(f"[red]Unknown agent[/red] {args.agent}. Run: pal agent list")
+                return 2
+
+            session_dir = Path(agent["path"]) / "sessions" / args.session_name
+            if not session_dir.exists():
+                print(f"[yellow]Session not found[/yellow] {session_dir}")
+                return 0
+
+            if not args.yes:
+                if not Confirm.ask(f"Delete session directory {session_dir}?", default=False):
+                    print("[yellow]Cancelled[/yellow]")
+                    return 0
+
+            shutil.rmtree(session_dir)
+            print(f"[green]Removed[/green] {session_dir}")
+            return 0
 
     if args.cmd == "task":
 
