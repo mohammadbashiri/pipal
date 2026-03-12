@@ -73,6 +73,13 @@ def load_persona(agent_path: str) -> str:
     return _load_files(files)
 
 
+def _load_summary(agent: Path, session_name: str) -> str:
+    summary_path = agent / "sessions" / session_name / "summary.md"
+    if not summary_path.exists():
+        return ""
+    return summary_path.read_text(encoding="utf-8").strip()
+
+
 def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
     """Extract --session <name> from args. Returns (session_name, remaining_args)."""
     remaining = []
@@ -183,6 +190,18 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         system_prompt = _load_files([agent / fname for fname in ROUTINE_CONTEXT_FILES])
     else:
         system_prompt = load_persona(agent_path)
+
+    if not no_session:
+        summary = _load_summary(agent, session_name)
+        if summary:
+            summary_block = (
+                "Rolling summary (supplemental; core files are authoritative if conflicts):\n"
+                f"{summary}"
+            )
+            if system_prompt:
+                system_prompt = f"{system_prompt}\n\n---\n\n{summary_block}"
+            else:
+                system_prompt = summary_block
 
     _run_agent_cmd(
         agent_path=agent_path,
