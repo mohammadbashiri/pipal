@@ -33,6 +33,16 @@
 - Use for headless runs, cron, multi-agent orchestration
 - Keep CLI runner as optional backend for interactive use
 
+### 5) Persistent agent layer hardening
+- Ordering guarantees: core files → summary → recent history
+- Ensure tool-only turn filtering + timestamps are preserved
+- Graceful handling of missing/empty summary/history files
+- Summary quality controls (refresh policy, size caps)
+- Config knobs for history length + summary path per agent
+- Optional visibility (debug logs/flags to confirm injections)
+- Token budget protection (hard caps, truncation strategy)
+- Retention policy for old sessions
+
 ## Decisions
 - Task file format: Markdown + YAML frontmatter
 - Assignments registry: repo-root `assignments.json`
@@ -56,6 +66,13 @@
   - scheduled runs via daemon ✅
   - assignments registry ❌
 - 🔴 5) RPC backend
+- 🟡 6) Persistent agent layer hardening
+  - ordering + tool-only filtering + missing files
+  - summary quality controls + config knobs
+  - visibility + token budget + retention policy
 
 ## Open Questions
 - Memory update policy and approval flow
+
+## Backlog
+- Docs + tests for persistent agent layer
