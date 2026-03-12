@@ -14,7 +14,7 @@ AGENT_FILES = [
     "JOURNAL.md",
 ]
 
-TEMPLATE_PKG = "pi_agents.templates.default"
+TEMPLATE_PKG = "pipal.templates.default"
 
 
 def _load_template(filename: str) -> str:

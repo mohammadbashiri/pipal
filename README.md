@@ -44,7 +44,7 @@ Existing registries in `~/.pi/agents.json` are auto‑migrated on first run.
 
 ## Tasks (coming soon)
 
-`src/pi_agents/templates/default/task.md` is the template that will be used when task support lands.
+`src/pipal/templates/default/task.md` is the template that will be used when task support lands.
 
 ## Notes
 

@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from .registry import pipal_dir
 
-TEMPLATE_PKG = "pi_agents.templates.default"
+TEMPLATE_PKG = "pipal.templates.default"
 TASK_TEMPLATE = "task.md"
 
 
