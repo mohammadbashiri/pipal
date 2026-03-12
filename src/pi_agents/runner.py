@@ -2,7 +2,9 @@ import os
 import shutil
 import sys
 import subprocess
+from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 
 PERSONA_FILES = [
@@ -86,7 +88,10 @@ def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
     return session_name, remaining
 
 
-EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "auto_greet.ts"
+EXTENSIONS = [
+    Path(__file__).resolve().parent / "extensions" / "auto_greet.ts",
+    Path(__file__).resolve().parent / "extensions" / "rolling_summary.ts",
+]
 
 
 def _build_pi_cmd(
@@ -100,8 +105,10 @@ def _build_pi_cmd(
 ) -> list[str]:
     cmd = ["pi"]
 
-    if include_extension and EXTENSION_PATH.exists():
-        cmd += ["--extension", str(EXTENSION_PATH)]
+    if include_extension:
+        for extension_path in EXTENSIONS:
+            if extension_path.exists():
+                cmd += ["--extension", str(extension_path)]
 
     provider = llm_config.get("provider")
     model = llm_config.get("model")
@@ -114,15 +121,12 @@ def _build_pi_cmd(
     if no_session:
         cmd.append("--no-session")
     else:
-        # Named session file per agent
-        sessions_dir = agent / "sessions"
+        # Folder-based sessions: new file per launch
+        sessions_dir = agent / "sessions" / session_name
         sessions_dir.mkdir(parents=True, exist_ok=True)
-        session_file = sessions_dir / f"{session_name}.jsonl"
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        session_file = sessions_dir / f"{ts}_{uuid4().hex[:8]}.jsonl"
         cmd += ["--session", str(session_file.resolve())]
-
-        # Continue if session already exists
-        if session_file.exists():
-            cmd.append("-c")
 
     # Append persona context to the system prompt (kept out of chat log)
     if system_prompt:
