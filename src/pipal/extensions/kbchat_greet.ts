@@ -3,10 +3,10 @@ import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const INTRO_GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin and ask for the knowledge base path you should use.";
+  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question.";
 
 const RETURN_GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin and ask for the knowledge base path you should use.";
+  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question.";
 
 function resolveInitMarker(agentDir?: string | null) {
   if (!agentDir) return undefined;
@@ -32,6 +32,18 @@ function markInitialized(agentDir?: string | null) {
   }
 }
 
+function readKbPath(agentDir?: string | null): string {
+  if (!agentDir) return "";
+  const kbPath = path.join(agentDir, "KB.md");
+  try {
+    const content = fs.readFileSync(kbPath, "utf-8");
+    const match = content.match(/Path:\s*(.*)/i);
+    return match ? match[1].trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (process.env.PIPAL_DISABLE_AUTOGREET === "1") return;
@@ -49,14 +61,19 @@ export default function (pi: ExtensionAPI) {
 
     if (hasMessages || hasGreet) return;
 
+    const kbPath = readKbPath(agentDir);
+
     const options = ctx.isIdle()
       ? { triggerTurn: true }
       : { deliverAs: "followUp" as const, triggerTurn: true };
 
+    const instruction = firstEver ? INTRO_GREET_INSTRUCTION : RETURN_GREET_INSTRUCTION;
+    const content = `${instruction}\n\nKB path: ${kbPath || "(not set)"}`;
+
     pi.sendMessage(
       {
         customType: "pipal-autogreet",
-        content: firstEver ? INTRO_GREET_INSTRUCTION : RETURN_GREET_INSTRUCTION,
+        content,
         display: false,
       },
       options
