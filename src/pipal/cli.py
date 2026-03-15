@@ -33,6 +33,8 @@ def build_parser():
     p_create = sub2.add_parser("create", help="Register an agent (and create folder if missing)")
     p_create.add_argument("name")
     p_create.add_argument("path", nargs="?", default=None)
+    p_create.add_argument("--type", default="default", help="Agent type (default: default)")
+    p_create.add_argument("--kb", dest="kb_path", default=None, help="Knowledge base path (kbchat only)")
 
     p_remove = sub2.add_parser("remove", help="Remove an agent")
     p_remove.add_argument("name")
@@ -391,6 +393,12 @@ def main(argv=None):
 
     if args.cmd == "agent":
         if args.agent_cmd == "create":
+            allowed_types = {"default", "kbchat"}
+            if args.type not in allowed_types:
+                print(f"[red]Unknown agent type[/red] {args.type}")
+                print("Valid types: default, kbchat")
+                return 2
+
             base = args.path or str(pipal_dir() / "agents")
             path = str((Path(base) / args.name).expanduser().resolve())
             Path(path).mkdir(parents=True, exist_ok=True)
@@ -406,7 +414,13 @@ def main(argv=None):
 
             print(f"[green]Ensured directory[/green] {path}")
 
-            ensure_agent_scaffold(path, name=args.name)
+            ensure_agent_scaffold(
+                path,
+                name=args.name,
+                template=args.type,
+                kb_path=args.kb_path,
+                agent_type=args.type if args.type != "default" else None,
+            )
 
             if _interactive_set_llm(path, args.name):
                 return 0
