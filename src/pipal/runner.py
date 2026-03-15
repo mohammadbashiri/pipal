@@ -13,6 +13,7 @@ PERSONA_FILES = [
     "POLICY.md",
     "USER.md",
     "MEMORY.md",
+    "KB.md",
 ]
 
 ROUTINE_CONTEXT_FILES = [
@@ -83,6 +84,31 @@ def _load_summary(agent: Path, session_name: str) -> str:
         return ""
 
 
+def _read_agent_type(agent: Path) -> str | None:
+    type_path = agent / ".pipal_type"
+    if not type_path.exists():
+        return None
+    try:
+        return type_path.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _strip_tool_flags(args: list[str]) -> list[str]:
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--tools" and i + 1 < len(args):
+            i += 2
+            continue
+        if args[i] == "--no-tools":
+            i += 1
+            continue
+        out.append(args[i])
+        i += 1
+    return out
+
+
 def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
     """Extract --session <name> from args. Returns (session_name, remaining_args)."""
     remaining = []
@@ -98,10 +124,16 @@ def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
     return session_name, remaining
 
 
-EXTENSIONS = [
+DEFAULT_EXTENSIONS = [
     Path(__file__).resolve().parent / "extensions" / "rolling_summary.ts",
     Path(__file__).resolve().parent / "extensions" / "auto_greet.ts",
 ]
+
+
+def _extension_paths(agent_type: str | None) -> list[Path]:
+    if agent_type == "kbchat":
+        return [Path(__file__).resolve().parent / "extensions" / "kbchat_greet.ts"]
+    return DEFAULT_EXTENSIONS
 
 
 def _build_pi_cmd(
@@ -113,11 +145,13 @@ def _build_pi_cmd(
     system_prompt: str | None,
     include_extension: bool = True,
     resume: bool = False,
+    extensions: list[Path] | None = None,
 ) -> list[str]:
     cmd = ["pi"]
 
     if include_extension:
-        for extension_path in EXTENSIONS:
+        extension_paths = extensions if extensions is not None else DEFAULT_EXTENSIONS
+        for extension_path in extension_paths:
             if extension_path.exists():
                 cmd += ["--extension", str(extension_path)]
 
@@ -157,6 +191,7 @@ def _run_agent_cmd(
     no_session: bool,
     session_name: str,
     resume: bool,
+    extensions: list[Path] | None = None,
 ):
     cmd = _build_pi_cmd(
         agent_path=agent_path,
@@ -166,6 +201,7 @@ def _run_agent_cmd(
         session_name=session_name,
         system_prompt=system_prompt,
         resume=resume,
+        extensions=extensions,
     )
 
     os.environ["PIPAL_AGENT_DIR"] = str(Path(agent_path).resolve())
@@ -189,6 +225,11 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         no_session = True
 
     agent = Path(agent_path)
+
+    agent_type = _read_agent_type(agent)
+    if agent_type == "kbchat":
+        extra_args = _strip_tool_flags(extra_args)
+        extra_args += ["--tools", "read,grep,find,ls"]
 
     if resume and not no_session:
         sessions_dir = agent / "sessions" / session_name
@@ -224,6 +265,7 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         session_name=session_name,
         system_prompt=system_prompt,
         resume=resume,
+        extensions=_extension_paths(agent_type),
     )
 
 
@@ -240,14 +282,21 @@ def run_agent_print(
     agent = Path(agent_path)
     system_prompt = load_persona(agent_path)
 
+    extra_args = ["-p", prompt]
+    agent_type = _read_agent_type(agent)
+    if agent_type == "kbchat":
+        extra_args = _strip_tool_flags(extra_args)
+        extra_args += ["--tools", "read,grep,find,ls"]
+
     cmd = _build_pi_cmd(
         agent_path=agent_path,
         llm_config=llm_config,
-        extra_args=["-p", prompt],
+        extra_args=extra_args,
         no_session=no_session,
         session_name=session_name,
         system_prompt=system_prompt,
         include_extension=True,
+        extensions=_extension_paths(agent_type),
     )
 
     env = os.environ.copy()
