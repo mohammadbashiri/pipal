@@ -43,6 +43,25 @@
 - Token budget protection (hard caps, truncation strategy)
 - Retention policy for old sessions
 
+### 6) `pipal serve` backend (spec)
+- New CLI subcommand: `pipal serve`
+- Options:
+  - `--host 0.0.0.0` / `--port 8000`
+  - `--auth-token <token>` (optional)
+  - `--agent <name>` (scope to one agent)
+  - `--session <name>` (scope to one session folder)
+  - `--session-file <file>` (scope to one session file)
+  - `--read-only` (block writes)
+- API surface (same as current pipal-web backend):
+  - REST: list agents/sessions/files/history, create session
+  - WS: init (agent/session/session_file), prompt (message/images), stream events
+- Behavior should match TUI:
+  - persona + summary injection
+  - llm.json/llm.local.json provider/model
+  - extensions (rolling_summary + greet)
+  - kbchat tool restrictions
+- Decoupling: allows multiple servers on different ports for different scopes
+
 ## Decisions
 - Task file format: Markdown + YAML frontmatter
 - Assignments registry: repo-root `assignments.json`
