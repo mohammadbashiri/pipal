@@ -2,14 +2,24 @@
 
 Persistent agents on top of [pi](https://github.com/badlogic/pi-mono).
 
-## Install
+## Install (fresh)
 
-1) Install pi:
+1) Install Node.js (required for `pi`):
+```bash
+brew install node
+```
+
+2) Install uv:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+3) Install pi:
 ```bash
 npm install -g @mariozechner/pi-coding-agent
 ```
 
-2) Install pipal (editable for dev):
+4) Install pipal (editable for dev):
 ```bash
 uv tool install -e .
 ```
