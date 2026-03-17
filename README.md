@@ -14,12 +14,27 @@ npm install -g @mariozechner/pi-coding-agent
 uv tool install -e .
 ```
 
+If you update dependencies in `pyproject.toml`, reinstall the tool env:
+```bash
+uv tool uninstall pipal
+uv tool install -e .
+```
+
 ## Quick Start
 
 ```bash
 pipal agent create momo
 pipal agent chat momo
 ```
+
+## Server
+
+Run the HTTP/WS backend:
+```bash
+pipal serve --port 8000
+```
+
+If WebSockets fail, reinstall pipal via `uv tool install -e .` (it must install into the tool env).
 
 On create, pipal will prompt you to pick a model from `pi --list-models` and write `llm.json`.
 
