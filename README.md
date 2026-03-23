@@ -37,6 +37,18 @@ pipal agent create momo
 pipal agent chat momo
 ```
 
+## KB Chat (Erklär‑Erwin)
+
+Create a knowledge‑base agent (kbchat):
+```bash
+pipal agent create erwin --type kbchat --kb /tmp/knowledge_base
+```
+
+This writes the KB path into:
+```
+~/.pipal/agents/erwin/KB.md
+```
+
 ## Server
 
 Run the HTTP/WS backend:
