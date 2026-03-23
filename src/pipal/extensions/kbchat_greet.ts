@@ -3,10 +3,10 @@ import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const INTRO_GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin in English. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question. Add: 'I can also speak German if you prefer that.'";
+  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin in English. If no KB is configured or it is missing, ask the user to set it. If it is configured, say: 'Hey, how can I help you with the [KB NAME]?' Do not mention filesystem paths or internal locations. Add: 'I can also speak German if you prefer that.'";
 
 const RETURN_GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin in English. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question. Add: 'I can also speak German if you prefer that.'";
+  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin in English. If no KB is configured or it is missing, ask the user to set it. If it is configured, say: 'Hey, how can I help you with the [KB NAME]?' Do not mention filesystem paths or internal locations. Add: 'I can also speak German if you prefer that.'";
 
 function resolveInitMarker(agentDir?: string | null) {
   if (!agentDir) return undefined;
@@ -32,15 +32,19 @@ function markInitialized(agentDir?: string | null) {
   }
 }
 
-function readKbPath(agentDir?: string | null): string {
-  if (!agentDir) return "";
+function readKbConfig(agentDir?: string | null): { name?: string; path?: string } {
+  if (!agentDir) return {};
   const kbPath = path.join(agentDir, "KB.md");
   try {
     const content = fs.readFileSync(kbPath, "utf-8");
-    const match = content.match(/Path:\s*(.*)/i);
-    return match ? match[1].trim() : "";
+    const nameMatch = content.match(/Name:\s*(.*)/i);
+    const pathMatch = content.match(/Path:\s*(.*)/i);
+    return {
+      name: nameMatch ? nameMatch[1].trim() : undefined,
+      path: pathMatch ? pathMatch[1].trim() : undefined,
+    };
   } catch {
-    return "";
+    return {};
   }
 }
 
@@ -81,14 +85,24 @@ export default function (pi: ExtensionAPI) {
 
     if (hasMessages || hasGreet) return;
 
-    const kbPath = readKbPath(agentDir);
+    const kbConfig = readKbConfig(agentDir);
+    const kbPath = kbConfig.path || "";
+    const kbName = kbConfig.name || "knowledge base";
+    const hasPath = Boolean(kbPath);
+    const kbExists = hasPath && fs.existsSync(kbPath);
 
     const options = ctx.isIdle()
       ? { triggerTurn: true }
       : { deliverAs: "followUp" as const, triggerTurn: true };
 
     const instruction = firstEver ? INTRO_GREET_INSTRUCTION : RETURN_GREET_INSTRUCTION;
-    const content = `${instruction}\n\nKB path: ${kbPath || "(not set)"}`;
+    let kbLine = "KB is not configured";
+    if (hasPath && kbExists) {
+      kbLine = `KB name: ${kbName}`;
+    } else if (hasPath && !kbExists) {
+      kbLine = "KB path is configured but not found";
+    }
+    const content = `${instruction}\n\n${kbLine}\n\nKB NAME: ${kbName}`;
 
     pi.sendMessage(
       {
