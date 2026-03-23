@@ -3,10 +3,10 @@ import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const INTRO_GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question.";
+  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin in English. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question. Add: 'I can also speak German if you prefer that.'";
 
 const RETURN_GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question.";
+  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin in English. If no KB path is set, ask for it. If it is set, acknowledge it and invite a question. Add: 'I can also speak German if you prefer that.'";
 
 function resolveInitMarker(agentDir?: string | null) {
   if (!agentDir) return undefined;
@@ -42,6 +42,26 @@ function readKbPath(agentDir?: string | null): string {
   } catch {
     return "";
   }
+}
+
+function hasGermanPreference(entries: any[]): boolean {
+  return entries.some(
+    (entry) =>
+      entry?.type === "custom_message" &&
+      entry?.customType === "pipal-lang" &&
+      entry?.content === "de"
+  );
+}
+
+function recordGermanPreference(pi: ExtensionAPI) {
+  pi.sendMessage(
+    {
+      customType: "pipal-lang",
+      content: "de",
+      display: false,
+    },
+    { triggerTurn: false }
+  );
 }
 
 export default function (pi: ExtensionAPI) {
@@ -82,5 +102,21 @@ export default function (pi: ExtensionAPI) {
     if (firstEver) {
       markInitialized(agentDir);
     }
+  });
+
+  pi.on("message_end", async (event, ctx) => {
+    const role = event?.message?.role;
+    if (role !== "user") return;
+
+    const content = event?.message?.content;
+    const normalized = typeof content === "string" ? content.toLowerCase() : "";
+    if (!normalized) return;
+
+    if (!/(\bdeutsch\b|\bgerman\b|\bauf deutsch\b)/i.test(normalized)) return;
+
+    const entries = ctx.sessionManager.getEntries();
+    if (hasGermanPreference(entries)) return;
+
+    recordGermanPreference(pi);
   });
 }
