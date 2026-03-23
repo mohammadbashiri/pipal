@@ -118,7 +118,8 @@ def build_parser():
     psrv.add_argument("--agent", dest="serve_agent", default=None, help="Scope to one agent")
     psrv.add_argument("--session", dest="serve_session", default=None, help="Scope to one session")
     psrv.add_argument("--session-file", dest="serve_session_file", default=None, help="Scope to one session file")
-    psrv.add_argument("--read-only", action="store_true", help="Read-only mode")
+    psrv.add_argument("--read-only", action="store_true", help="History-only (no prompts, no new sessions)")
+    psrv.add_argument("--read-only-tools", action="store_true", help="Allow chat + sessions, restrict tools to read/grep/find/ls")
 
     return p
 
@@ -203,6 +204,7 @@ def main(argv=None):
             session=args.serve_session,
             session_file=args.serve_session_file,
             read_only=args.read_only,
+            read_only_tools=args.read_only_tools,
         )
 
     if args.cmd == "task":

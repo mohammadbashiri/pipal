@@ -23,6 +23,7 @@ def create_app(
     session_scope: str | None = None,
     session_file_scope: str | None = None,
     read_only: bool = False,
+    read_only_tools: bool = False,
 ) -> FastAPI:
     settings = ServerSettings.load()
     app = FastAPI(title="pipal server", version="0.1.0")
@@ -252,6 +253,7 @@ def create_app(
                 session_name=session_name,
                 session_file=session_path,
                 llm_config=llm_config,
+                read_only_tools=read_only_tools,
             )
             await client.start()
 
@@ -299,6 +301,7 @@ def run_server(
     session: str | None = None,
     session_file: str | None = None,
     read_only: bool = False,
+    read_only_tools: bool = False,
 ):
     import uvicorn
 
@@ -307,5 +310,6 @@ def run_server(
         session_scope=session,
         session_file_scope=session_file,
         read_only=read_only,
+        read_only_tools=read_only_tools,
     )
     uvicorn.run(app, host=host, port=port)
