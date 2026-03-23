@@ -19,12 +19,14 @@ class PiRpcClient:
         session_name: str = "main",
         session_file: Path | None = None,
         llm_config: dict[str, Any] | None = None,
+        read_only_tools: bool = False,
     ):
         self.settings = settings
         self.agent_dir = agent_dir
         self.session_name = session_name
         self.session_file = session_file
         self.llm_config = llm_config or {}
+        self.read_only_tools = read_only_tools
         self.proc: asyncio.subprocess.Process | None = None
         self._queue: asyncio.Queue[RpcEvent] = asyncio.Queue()
         self._reader_task: asyncio.Task | None = None
@@ -51,7 +53,7 @@ class PiRpcClient:
             cmd += ["--model", model]
 
         agent_type = read_agent_type(self.agent_dir)
-        if agent_type == "kbchat":
+        if agent_type == "kbchat" or self.read_only_tools:
             cmd += ["--tools", "read,grep,find,ls"]
 
         if system_prompt:
