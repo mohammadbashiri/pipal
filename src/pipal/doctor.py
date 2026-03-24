@@ -5,12 +5,12 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 from dataclasses import dataclass
 from typing import Iterable
 
 from rich import print
 from rich.console import Console
-from rich.table import Table
 
 from .llm_config import load_llm_config
 from .registry import get_agent, list_agents
@@ -71,6 +71,23 @@ def _check_rpc_mode(help_text: str) -> bool:
     return False
 
 
+def _resolve_windows_pi(pi_bin: str) -> str:
+    if os.name != "nt":
+        return pi_bin
+    lower = pi_bin.lower()
+    if lower.endswith((".cmd", ".exe", ".bat")):
+        return pi_bin
+    for ext in (".cmd", ".exe", ".bat"):
+        candidate = pi_bin + ext
+        if os.path.exists(candidate):
+            return candidate
+    for name in ("pi.cmd", "pi.exe", "pi.bat", "pi"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return pi_bin
+
+
 async def _run_rpc_check(agent_path: str, llm: dict) -> tuple[bool, str]:
     settings = ServerSettings.load()
     client = PiRpcClient(
@@ -112,6 +129,23 @@ def _select_agent(agent_name: str | None) -> tuple[str, str, dict] | None:
     return None
 
 
+def _resolve_windows_pi(pi_bin: str) -> str:
+    if os.name != "nt":
+        return pi_bin
+    lower = pi_bin.lower()
+    if lower.endswith((".cmd", ".exe", ".bat")):
+        return pi_bin
+    for ext in (".cmd", ".exe", ".bat"):
+        candidate = pi_bin + ext
+        if os.path.exists(candidate):
+            return candidate
+    for name in ("pi.cmd", "pi.exe", "pi.bat", "pi"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return pi_bin
+
+
 def run_doctor(agent_name: str | None = None) -> int:
     results: list[CheckResult] = []
     skip_runtime = os.getenv("PIPAL_DOCTOR_SKIP_RUNTIME") == "1"
@@ -148,9 +182,9 @@ def run_doctor(agent_name: str | None = None) -> int:
         result = CheckResult("pi binary", False, str(exc))
         results.append(result)
         log_result(result)
-        _print_results(results)
         return 2
 
+    pi_bin = _resolve_windows_pi(pi_bin)
     result = CheckResult("pi binary", True, pi_bin)
     results.append(result)
     log_result(result)
@@ -235,18 +269,3 @@ def run_doctor(agent_name: str | None = None) -> int:
     return 0
 
 
-def _print_results(results: list[CheckResult]) -> None:
-    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
-    unicode_ok = True
-    if encoding:
-        try:
-            "✓✗".encode(encoding)
-        except Exception:
-            unicode_ok = False
-    check = "✓" if unicode_ok else "OK"
-    cross = "✗" if unicode_ok else "FAIL"
-
-    for result in results:
-        color = "green" if result.ok else "red"
-        symbol = check if result.ok else cross
-        print(f"[{color}]{symbol} {result.name}: {result.details}[/{color}]")
