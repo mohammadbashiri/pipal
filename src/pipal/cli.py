@@ -9,6 +9,7 @@ from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
 from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
 from .session_summary import summarize_session
+from .doctor import run_doctor
 from .tasks import (
     list_tasks,
     load_task,
@@ -121,6 +122,9 @@ def build_parser():
     psrv.add_argument("--read-only", action="store_true", help="History-only (no prompts, no new sessions)")
     psrv.add_argument("--read-only-tools", action="store_true", help="Allow chat + sessions, restrict tools to read/grep/find/ls")
 
+    p_doctor = sub.add_parser("doctor", help="Check local pi compatibility")
+    p_doctor.add_argument("--agent", default=None, help="Agent to use for runtime check")
+
     return p
 
 def main(argv=None):
@@ -206,6 +210,9 @@ def main(argv=None):
             read_only=args.read_only,
             read_only_tools=args.read_only_tools,
         )
+
+    if args.cmd == "doctor":
+        return run_doctor(args.agent)
 
     if args.cmd == "task":
 

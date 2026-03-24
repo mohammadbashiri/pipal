@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+import subprocess
+from dataclasses import dataclass
+from typing import Iterable
+
+from rich import print
+from rich.console import Console
+from rich.table import Table
+
+from .llm_config import load_llm_config
+from .registry import get_agent, list_agents
+from .runner import _find_native_pi
+from .server_config import ServerSettings
+from .server_rpc import PiRpcClient
+from pathlib import Path
+
+
+REQUIRED_FLAGS = [
+    "--mode",
+    "--session",
+    "--session-dir",
+    "--extension",
+    "--append-system-prompt",
+    "--no-session",
+    "--resume",
+    "--tools",
+]
+
+
+@dataclass
+class CheckResult:
+    name: str
+    ok: bool
+    details: str
+
+
+def _run(cmd: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+
+
+def _format_output(proc: subprocess.CompletedProcess) -> str:
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    if stdout:
+        return stdout
+    return stderr
+
+
+def _check_flag_presence(help_text: str, flags: Iterable[str]) -> list[str]:
+    missing: list[str] = []
+    for flag in flags:
+        if flag not in help_text:
+            missing.append(flag)
+    return missing
+
+
+def _check_prompt_flag(help_text: str) -> bool:
+    if "--prompt" in help_text:
+        return True
+    return bool(re.search(r"\s-p[,\s]", help_text))
+
+
+def _check_rpc_mode(help_text: str) -> bool:
+    if "rpc" in help_text.lower():
+        return True
+    return False
+
+
+async def _run_rpc_check(agent_path: str, llm: dict) -> tuple[bool, str]:
+    settings = ServerSettings.load()
+    client = PiRpcClient(
+        settings=settings,
+        agent_dir=Path(agent_path),
+        session_name="doctor",
+        llm_config=llm,
+        read_only_tools=True,
+    )
+
+    previous_autogreet = os.environ.get("PIPAL_DISABLE_AUTOGREET")
+    os.environ["PIPAL_DISABLE_AUTOGREET"] = "1"
+
+    try:
+        await client.start()
+        return True, "RPC started"
+    finally:
+        await client.close()
+        if previous_autogreet is None:
+            os.environ.pop("PIPAL_DISABLE_AUTOGREET", None)
+        else:
+            os.environ["PIPAL_DISABLE_AUTOGREET"] = previous_autogreet
+
+
+def _select_agent(agent_name: str | None) -> tuple[str, str, dict] | None:
+    if agent_name:
+        agent = get_agent(agent_name)
+        if not agent:
+            return None
+        llm = load_llm_config(agent["path"])
+        if not llm:
+            return None
+        return agent["name"], agent["path"], llm
+
+    for name, path in list_agents().items():
+        llm = load_llm_config(path)
+        if llm:
+            return name, path, llm
+    return None
+
+
+def run_doctor(agent_name: str | None = None) -> int:
+    results: list[CheckResult] = []
+    skip_runtime = os.getenv("PIPAL_DOCTOR_SKIP_RUNTIME") == "1"
+    console = Console()
+
+    def log_start(label: str) -> None:
+        console.print(f"[cyan]→ {label}...[/cyan]", end="\r")
+
+    def log_result(result: CheckResult) -> None:
+        color = "green" if result.ok else "red"
+        symbol = "✓" if result.ok else "✗"
+        line = f"[{color}]{symbol} {result.name}: {result.details}[/{color}]"
+        console.print(f"{line}          ")
+
+    log_start("locate pi")
+    try:
+        pi_bin = _find_native_pi()
+    except FileNotFoundError as exc:
+        result = CheckResult("pi binary", False, str(exc))
+        results.append(result)
+        log_result(result)
+        _print_results(results)
+        return 2
+
+    result = CheckResult("pi binary", True, pi_bin)
+    results.append(result)
+    log_result(result)
+
+    log_start("pi --version")
+    version_proc = _run([pi_bin, "--version"])
+    if version_proc.returncode != 0:
+        result = CheckResult(
+            "pi --version",
+            False,
+            _format_output(version_proc) or f"Exit {version_proc.returncode}",
+        )
+    else:
+        result = CheckResult("pi --version", True, _format_output(version_proc))
+    results.append(result)
+    log_result(result)
+
+    log_start("pi --help")
+    help_proc = _run([pi_bin, "--help"])
+    help_text = _format_output(help_proc)
+    if help_proc.returncode != 0 or not help_text:
+        result = CheckResult(
+            "pi --help",
+            False,
+            help_text or f"Exit {help_proc.returncode}",
+        )
+        results.append(result)
+        log_result(result)
+        return 2
+
+    log_start("required flags")
+    missing_flags = _check_flag_presence(help_text, REQUIRED_FLAGS)
+    if missing_flags:
+        result = CheckResult(
+            "required flags",
+            False,
+            "Missing: " + ", ".join(missing_flags),
+        )
+    else:
+        result = CheckResult("required flags", True, "All present")
+    results.append(result)
+    log_result(result)
+
+    log_start("prompt flag")
+    result = CheckResult("prompt flag", _check_prompt_flag(help_text), "-p/--prompt found" if _check_prompt_flag(help_text) else "-p/--prompt missing")
+    results.append(result)
+    log_result(result)
+
+    log_start("rpc mode")
+    result = CheckResult("rpc mode", _check_rpc_mode(help_text), "rpc mentioned in help" if _check_rpc_mode(help_text) else "rpc not found in help")
+    results.append(result)
+    log_result(result)
+
+    if skip_runtime:
+        result = CheckResult("rpc start", True, "Skipped (PIPAL_DOCTOR_SKIP_RUNTIME=1)")
+        results.append(result)
+        log_result(result)
+    else:
+        agent_info = _select_agent(agent_name)
+        if not agent_info:
+            result = CheckResult(
+                "rpc start",
+                False,
+                "No agent with llm.json found. Run: pipal agent set-llm <agent> \"provider:model\"",
+            )
+            results.append(result)
+            log_result(result)
+            return 2
+
+        agent_name, agent_path, llm = agent_info
+        log_start("rpc start")
+        try:
+            ok, details = asyncio.run(_run_rpc_check(agent_path, llm))
+            result = CheckResult("rpc start", ok, details)
+        except Exception as exc:
+            result = CheckResult("rpc start", False, f"Exception: {exc}")
+        results.append(result)
+        log_result(result)
+
+    if any(not result.ok for result in results):
+        return 2
+    return 0
+
+
+def _print_results(results: list[CheckResult]) -> None:
+    for result in results:
+        color = "green" if result.ok else "red"
+        symbol = "✓" if result.ok else "✗"
+        print(f"[{color}]{symbol} {result.name}: {result.details}[/{color}]")
