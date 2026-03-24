@@ -19,8 +19,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 npm install -g @mariozechner/pi-coding-agent
 ```
 
-4) Install pipal (editable for dev):
+4) Install pipal (recommended):
 ```bash
+uv tool install git+https://github.com/mohammadbashiri/pipal.git
+```
+
+For local development (editable install):
+```bash
+git clone https://github.com/mohammadbashiri/pipal
+cd pipal
 uv tool install -e .
 ```
 
