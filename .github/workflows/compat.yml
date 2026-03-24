@@ -1,0 +1,40 @@
+name: pipal compatibility
+
+on:
+  push:
+  pull_request:
+
+env:
+  PI_VERSION: "latest"
+
+jobs:
+  doctor:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install pi
+        run: npm install -g @mariozechner/pi-coding-agent@${{ env.PI_VERSION }}
+
+      - name: Install pipal
+        run: uv pip install -e .
+
+      - name: Run compatibility checks
+        env:
+          PIPAL_DOCTOR_SKIP_RUNTIME: "1"
+        run: pipal doctor
