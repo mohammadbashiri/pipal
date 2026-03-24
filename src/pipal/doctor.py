@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -116,12 +117,27 @@ def run_doctor(agent_name: str | None = None) -> int:
     skip_runtime = os.getenv("PIPAL_DOCTOR_SKIP_RUNTIME") == "1"
     console = Console()
 
+    def _supports_unicode() -> bool:
+        encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+        if not encoding:
+            return True
+        try:
+            "→✓✗".encode(encoding)
+            return True
+        except Exception:
+            return False
+
+    unicode_ok = _supports_unicode()
+    arrow = "→" if unicode_ok else "->"
+    check = "✓" if unicode_ok else "OK"
+    cross = "✗" if unicode_ok else "FAIL"
+
     def log_start(label: str) -> None:
-        console.print(f"[cyan]→ {label}...[/cyan]", end="\r")
+        console.print(f"[cyan]{arrow} {label}...[/cyan]", end="\r")
 
     def log_result(result: CheckResult) -> None:
         color = "green" if result.ok else "red"
-        symbol = "✓" if result.ok else "✗"
+        symbol = check if result.ok else cross
         line = f"[{color}]{symbol} {result.name}: {result.details}[/{color}]"
         console.print(f"{line}          ")
 
@@ -220,7 +236,17 @@ def run_doctor(agent_name: str | None = None) -> int:
 
 
 def _print_results(results: list[CheckResult]) -> None:
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+    unicode_ok = True
+    if encoding:
+        try:
+            "✓✗".encode(encoding)
+        except Exception:
+            unicode_ok = False
+    check = "✓" if unicode_ok else "OK"
+    cross = "✗" if unicode_ok else "FAIL"
+
     for result in results:
         color = "green" if result.ok else "red"
-        symbol = "✓" if result.ok else "✗"
+        symbol = check if result.ok else cross
         print(f"[{color}]{symbol} {result.name}: {result.details}[/{color}]")
