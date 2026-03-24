@@ -32,7 +32,7 @@ jobs:
         run: npm install -g @mariozechner/pi-coding-agent@${{ env.PI_VERSION }}
 
       - name: Install pipal
-        run: uv pip install -e .
+        run: uv pip install -e . --system
 
       - name: Run compatibility checks
         env:
