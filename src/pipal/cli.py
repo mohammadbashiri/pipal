@@ -125,6 +125,9 @@ def build_parser():
     p_doctor = sub.add_parser("doctor", help="Check local pi compatibility")
     p_doctor.add_argument("--agent", default=None, help="Agent to use for runtime check")
 
+    p_uninstall = sub.add_parser("uninstall", help="Remove pipal data directory (~/.pipal)")
+    p_uninstall.add_argument("--yes", action="store_true", help="Skip confirmation")
+
     return p
 
 def main(argv=None):
@@ -213,6 +216,35 @@ def main(argv=None):
 
     if args.cmd == "doctor":
         return run_doctor(args.agent)
+
+    if args.cmd == "uninstall":
+        base = pipal_dir()
+
+        remove_data = args.yes or Confirm.ask(
+            f"Remove pipal data directory {base}?", default=False
+        )
+        if remove_data:
+            if base.exists():
+                for agent_name, agent_path in list_agents().items():
+                    if stop_daemon(agent_path):
+                        print(f"[green]Stopped[/green] daemon for [bold]{agent_name}[/bold]")
+                shutil.rmtree(base)
+                print(f"[green]Removed[/green] {base}")
+            else:
+                print("[yellow]No pipal data found[/yellow]")
+
+        remove_cli = args.yes or Confirm.ask(
+            "Uninstall pipal CLI via 'uv tool uninstall pipal'?", default=False
+        )
+        if remove_cli:
+            uv = shutil.which("uv")
+            if not uv:
+                print("[red]uv not found[/red]. Run: uv tool uninstall pipal")
+                return 2
+            result = subprocess.run([uv, "tool", "uninstall", "pipal"])
+            return result.returncode
+
+        return 0
 
     if args.cmd == "task":
 
