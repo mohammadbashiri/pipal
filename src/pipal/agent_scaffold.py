@@ -3,7 +3,7 @@ import importlib.resources
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_DIRS = ["skills", "tools", "sessions"]
+DEFAULT_DIRS = ["sessions"]
 
 AGENT_FILES = [
     "AGENTS.md",
