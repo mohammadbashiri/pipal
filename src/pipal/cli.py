@@ -122,7 +122,7 @@ def build_parser():
     psrv.add_argument("--read-only", action="store_true", help="History-only (no prompts, no new sessions)")
     psrv.add_argument("--read-only-tools", action="store_true", help="Allow chat + sessions, restrict tools to read/grep/find/ls")
 
-    p_doctor = sub.add_parser("doctor", help="Check local pi compatibility")
+    p_doctor = sub.add_parser("check-pi-compatibility", help="Check local pi compatibility")
     p_doctor.add_argument("--agent", default=None, help="Agent to use for runtime check")
 
     p_uninstall = sub.add_parser("uninstall", help="Remove pipal data directory (~/.pipal)")
@@ -214,7 +214,7 @@ def main(argv=None):
             read_only_tools=args.read_only_tools,
         )
 
-    if args.cmd == "doctor":
+    if args.cmd == "check-pi-compatibility":
         return run_doctor(args.agent)
 
     if args.cmd == "uninstall":
