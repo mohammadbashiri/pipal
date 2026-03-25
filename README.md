@@ -1,6 +1,8 @@
-# pipal
+<p align="center" style="margin-bottom: -28px;">
+  <img src="assets/pipal_logo.png" alt="pipal logo" style="width:520px; height:170px; object-fit:cover; object-position:center;" />
+</p>
 
-Persistent agents on top of [pi](https://github.com/badlogic/pi-mono).
+<p align="center">π-pal is a Persistant Agent Layer on top of <a href="https://github.com/badlogic/pi-mono">pi</a></p>
 
 ## Install (fresh)
 
