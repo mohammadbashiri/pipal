@@ -37,4 +37,4 @@ jobs:
       - name: Run compatibility checks
         env:
           PIPAL_DOCTOR_SKIP_RUNTIME: "1"
-        run: pipal doctor
+        run: pipal check-pi-compatibility
