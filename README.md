@@ -76,6 +76,17 @@ pipal agent create momo /path/to/agents
 
 Existing registries in `~/.pi/agents.json` are auto‑migrated on first run.
 
+## Uninstall
+
+Run the interactive uninstaller (choose which components to remove):
+```bash
+pipal uninstall
+```
+
+It will optionally remove:
+- the local pipal data directory (`~/.pipal`)
+- the pipal CLI (`uv tool uninstall pipal`)
+
 ## Tasks (coming soon)
 
 `src/pipal/templates/default/task.md` is the template that will be used when task support lands.
