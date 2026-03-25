@@ -1,5 +1,5 @@
-<p align="center" style="margin-bottom: -28px;">
-  <img src="assets/pipal_logo.png" alt="pipal logo" style="width:520px; height:170px; object-fit:cover; object-position:center;" />
+<p align="center">
+  <img src="assets/pipal_logo_cropped.png" alt="pipal logo" width="220" />
 </p>
 
 <p align="center">π-pal is a Persistant Agent Layer on top of <a href="https://github.com/badlogic/pi-mono">pi</a></p>
