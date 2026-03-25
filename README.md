@@ -4,11 +4,11 @@
 
 <p align="center">π-pal is a Persistant Agent Layer on top of <a href="https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent">pi-coding-agent</a></p>
 
-## Install (fresh)
+## Installation
 
-1) Install Node.js (required for `pi`):
+1) Install pi:
 ```bash
-brew install node
+npm install -g @mariozechner/pi-coding-agent
 ```
 
 2) Install uv:
@@ -16,12 +16,7 @@ brew install node
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-3) Install pi:
-```bash
-npm install -g @mariozechner/pi-coding-agent
-```
-
-4) Install pipal (recommended):
+3) Install pipal (recommended):
 ```bash
 uv tool install git+https://github.com/mohammadbashiri/pipal.git
 ```
@@ -46,17 +41,10 @@ pipal agent create momo
 pipal agent chat momo
 ```
 
-## KB Chat (Erklär‑Erwin)
+## Agent types
 
-Create a knowledge‑base agent (kbchat):
-```bash
-pipal agent create erwin --type kbchat --kb /tmp/knowledge_base
-```
-
-This writes the KB path into:
-```
-~/.pipal/agents/erwin/KB.md
-```
+pipal supports multiple agent types (different templates and behaviors). See [agent_types.md](agent_types.md).
+<---
 
 ## Server
 
