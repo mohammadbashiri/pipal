@@ -84,6 +84,57 @@ It will optionally remove:
 - the local pipal data directory (`~/.pipal`)
 - the pipal CLI (`uv tool uninstall pipal`)
 
+## Docker quickstart
+
+Create local data directories (so state persists across runs):
+```bash
+mkdir -p ~/.pipal-docker ~/.pi-docker
+```
+
+Run any pipal command via Docker:
+```bash
+docker run -it --rm \
+  -v ~/.pipal-docker:/home/pipal/.pipal \
+  -v ~/.pi-docker:/home/pipal/.pi \
+  pipal:latest agent chat momo
+```
+
+For docker compose, set data paths in `.env`:
+```bash
+cp .env.example .env
+# edit .env to point to your data dirs
+```
+
+If you need to log in to pi inside the container:
+```bash
+docker run -it --rm \
+  -v ~/.pipal-docker:/home/pipal/.pipal \
+  -v ~/.pi-docker:/home/pipal/.pi \
+  --entrypoint pi \
+  pipal:latest
+```
+
+Using docker compose:
+```bash
+# Fresh docker-only storage
+docker compose run --rm pipal pipal agent chat momo
+```
+
+Run the server:
+```bash
+docker compose run --rm --service-ports pipal serve --host 0.0.0.0 --port 8000
+```
+
+If you need to log in to pi inside the container:
+```bash
+docker compose run --rm pi
+```
+
+To build the image locally:
+```bash
+docker build -t pipal:latest .
+```
+
 ## Tasks (coming soon)
 
 `src/pipal/templates/default/task.md` is the template that will be used when task support lands.

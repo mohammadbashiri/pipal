@@ -1,0 +1,20 @@
+services:
+  pipal:
+    build: .
+    image: pipal:latest
+    volumes:
+      - ${PIPAL_DATA_DIR}:/home/pipal/.pipal
+      - ${PI_DATA_DIR}:/home/pipal/.pi
+    stdin_open: true
+    tty: true
+    ports:
+      - "8000:8000"
+
+  pi:
+    image: pipal:latest
+    entrypoint: ["pi"]
+    volumes:
+      - ${PIPAL_DATA_DIR}:/home/pipal/.pipal
+      - ${PI_DATA_DIR}:/home/pipal/.pi
+    stdin_open: true
+    tty: true
