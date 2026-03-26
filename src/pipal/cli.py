@@ -9,7 +9,7 @@ from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
 from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
 from .session_summary import summarize_session
-from .doctor import run_doctor
+from .check_pi_compatibility import run_doctor
 from .tasks import (
     list_tasks,
     load_task,
