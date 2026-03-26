@@ -18,12 +18,6 @@ function resolveInitMarker(agentDir?: string | null) {
   return newMarker;
 }
 
-function isFirstEver(agentDir?: string | null) {
-  const marker = resolveInitMarker(agentDir);
-  if (!marker) return true;
-  return !fs.existsSync(marker);
-}
-
 function markInitialized(agentDir?: string | null) {
   const marker = resolveInitMarker(agentDir);
   if (!marker) return;
@@ -32,12 +26,24 @@ function markInitialized(agentDir?: string | null) {
   }
 }
 
+function onboardingComplete(agentDir?: string | null): boolean {
+  if (!agentDir) return false;
+  const onboardingPath = path.join(agentDir, "onboarding.md");
+  if (!fs.existsSync(onboardingPath)) {
+    const marker = resolveInitMarker(agentDir);
+    return marker ? fs.existsSync(marker) : false;
+  }
+  const content = fs.readFileSync(onboardingPath, "utf-8");
+  const unchecked = content.match(/^- \[ \]/gm);
+  return !unchecked;
+}
+
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (process.env.PIPAL_DISABLE_AUTOGREET === "1") return;
 
     const agentDir = process.env.PIPAL_AGENT_DIR;
-    const firstEver = isFirstEver(agentDir);
+    const firstEver = !onboardingComplete(agentDir);
 
     const entries = ctx.sessionManager.getEntries();
     const hasMessages = entries.some((entry) => entry.type === "message");
@@ -62,7 +68,7 @@ export default function (pi: ExtensionAPI) {
       options
     );
 
-    if (firstEver) {
+    if (!firstEver) {
       markInitialized(agentDir);
     }
   });

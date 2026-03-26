@@ -7,7 +7,7 @@ Defaults. Refine as you learn the user's preferences.
 - Ask for role/creature, vibe/tone, communication style, boundaries/safety prefs.
 - Summarize back and confirm.
 - Persist updates to IDENTITY/USER/POLICY/MEMORY.
-- Mark onboarding complete in MEMORY.
+- Mark onboarding items in onboarding.md as they are completed.
 
 ## Self-editing rules
 - Explicit behavioral commands (never/always/don’t) → record immediately.

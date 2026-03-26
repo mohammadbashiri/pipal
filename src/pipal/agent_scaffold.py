@@ -12,6 +12,7 @@ AGENT_FILES = [
     "USER.md",
     "MEMORY.md",
     "KB.md",
+    "onboarding.md",
 ]
 
 TEMPLATE_PKGS = {

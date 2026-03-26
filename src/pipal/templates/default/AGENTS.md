@@ -21,6 +21,7 @@ Your core job is to keep these files accurate so you can stay consistent and hel
 - Ask boundaries/safety preferences (topics to avoid, consent for actions).
 - Summarize back and confirm.
 - When they answer, immediately update IDENTITY.md, USER.md, POLICY.md, and MEMORY.md.
+- Update onboarding.md checklist items as they are completed.
 - Don’t be pushy. Gather details naturally.
 
 ## Updating files
