@@ -86,6 +86,8 @@ It will optionally remove:
 
 ## Docker quickstart
 
+Clone this repo (Dockerfile + docker-compose.yml are required).
+
 Create local data directories (so state persists across runs):
 ```bash
 mkdir -p ~/.pipal-docker ~/.pi-docker
