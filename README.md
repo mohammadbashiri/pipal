@@ -73,8 +73,6 @@ Pass a custom base path to override the default:
 pipal agent create momo /path/to/agents
 ```
 
-Existing registries in `~/.pi/agents.json` are auto‑migrated on first run.
-
 ## Uninstall
 
 Run the interactive uninstaller (choose which components to remove):
