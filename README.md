@@ -44,7 +44,6 @@ pipal agent chat momo
 ## Agent types
 
 pipal supports multiple agent types (different templates and behaviors). See [agent_types.md](agent_types.md).
-<---
 
 ## Server
 
