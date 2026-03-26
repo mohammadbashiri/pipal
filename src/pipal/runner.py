@@ -16,6 +16,8 @@ PERSONA_FILES = [
     "KB.md",
 ]
 
+ONBOARDING_FILE = "onboarding.md"
+
 ROUTINE_CONTEXT_FILES = [
     "IDENTITY.md",
     "POLICY.md",
@@ -68,9 +70,34 @@ def _load_files(files: list[Path]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _resolve_init_marker(agent: Path) -> Path:
+    new_marker = agent / ".pipal_initialized"
+    old_marker = agent / ".pal_initialized"
+    if new_marker.exists():
+        return new_marker
+    if old_marker.exists():
+        return old_marker
+    return new_marker
+
+
+def _onboarding_complete(agent: Path) -> bool:
+    onboarding_path = agent / ONBOARDING_FILE
+    if not onboarding_path.exists():
+        return _resolve_init_marker(agent).exists()
+    try:
+        content = onboarding_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "- [ ]" not in content
+
+
 def load_persona(agent_path: str) -> str:
     """Read persona markdown files and concatenate into a system prompt."""
-    files = [Path(agent_path) / fname for fname in PERSONA_FILES]
+    agent = Path(agent_path)
+    files = [agent / fname for fname in PERSONA_FILES]
+    agent_type = _read_agent_type(agent)
+    if agent_type != "kbchat" and not _onboarding_complete(agent):
+        files.append(agent / ONBOARDING_FILE)
     return _load_files(files)
 
 
