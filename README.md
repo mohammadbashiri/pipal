@@ -86,7 +86,7 @@ It will optionally remove:
 
 ## Docker quickstart
 
-Clone this repo (Dockerfile + docker-compose.yml are required).
+Clone this repo (Dockerfile required).
 
 Create local data directories (so state persists across runs):
 ```bash
@@ -110,7 +110,7 @@ docker run -it --rm \
   pipal:latest
 ```
 
-See [docs/docker.md](docs/docker.md) for more Docker commands (server, compose, shell, etc.).
+See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, etc.).
 
 To build the image locally:
 ```bash
