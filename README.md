@@ -117,7 +117,7 @@ docker run -it --rm \
 Using docker compose:
 ```bash
 # Fresh docker-only storage
-docker compose run --rm pipal pipal agent chat momo
+docker compose run --rm pipal agent chat momo
 ```
 
 Run the server:
