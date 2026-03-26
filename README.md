@@ -132,6 +132,11 @@ If you need to log in to pi inside the container:
 docker compose run --rm pi
 ```
 
+Open a shell inside the container:
+```bash
+docker compose run --rm --entrypoint /bin/zsh pipal
+```
+
 To build the image locally:
 ```bash
 docker build -t pipal:latest .
