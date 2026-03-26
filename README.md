@@ -101,12 +101,6 @@ docker run -it --rm \
   pipal:latest agent chat momo
 ```
 
-For docker compose, set data paths in `.env`:
-```bash
-cp .env.example .env
-# edit .env to point to your data dirs
-```
-
 If you need to log in to pi inside the container:
 ```bash
 docker run -it --rm \
@@ -116,26 +110,7 @@ docker run -it --rm \
   pipal:latest
 ```
 
-Using docker compose:
-```bash
-# Fresh docker-only storage
-docker compose run --rm pipal agent chat momo
-```
-
-Run the server:
-```bash
-docker compose run --rm --service-ports pipal serve --host 0.0.0.0 --port 8000
-```
-
-If you need to log in to pi inside the container:
-```bash
-docker compose run --rm pi
-```
-
-Open a shell inside the container:
-```bash
-docker compose run --rm --entrypoint /bin/zsh pipal
-```
+See [docs/docker.md](docs/docker.md) for more Docker commands (server, compose, shell, etc.).
 
 To build the image locally:
 ```bash
