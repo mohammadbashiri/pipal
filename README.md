@@ -2,7 +2,7 @@
   <img src="assets/pipal_logo_cropped.png" alt="pipal logo" width="220" />
 </p>
 
-<p align="center">π-pal is a Persistant Agent Layer on top of <a href="https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent">pi-coding-agent</a></p>
+<p align="center">π-pal is a Persistent Agent Layer on top of <a href="https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent">pi-coding-agent</a></p>
 
 ## Installation
 
