@@ -13,6 +13,11 @@ from fastapi.responses import JSONResponse
 from .llm_config import load_llm_config
 from .registry import list_agents as registry_list_agents, get_agent
 from .server_config import ServerSettings
+from .server_context import (
+    ensure_session_meta,
+    update_session_meta,
+    update_session_title_from_prompt,
+)
 from .server_models import AgentInfo, SessionInfo, SessionFileInfo
 from .server_rpc import PiRpcClient
 
@@ -58,17 +63,18 @@ def create_app(
             return None
         return AgentInfo(name=agent["name"], path=Path(agent["path"]))
 
-    def _list_sessions(agent: AgentInfo) -> list[SessionInfo]:
+    def _list_sessions(agent: AgentInfo) -> list[dict]:
         sessions_dir = agent.path / "sessions"
         if not sessions_dir.exists():
             return []
-        sessions: list[SessionInfo] = []
+        sessions: list[dict] = []
         for path in sessions_dir.iterdir():
             if path.is_dir():
                 if session_scope and path.name != session_scope:
                     continue
-                sessions.append(SessionInfo(name=path.name, path=path))
-        return sorted(sessions, key=lambda s: s.name, reverse=True)
+                meta = ensure_session_meta(path)
+                sessions.append({"name": path.name, "path": path, **meta})
+        return sorted(sessions, key=lambda s: s.get("updated_at", ""), reverse=True)
 
     def _list_session_files(agent: AgentInfo, session_name: str) -> list[SessionFileInfo]:
         session_dir = agent.path / "sessions" / session_name
@@ -158,7 +164,16 @@ def create_app(
         agent = _get_agent(agent_name)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        return [{"name": s.name} for s in _list_sessions(agent)]
+        sessions = _list_sessions(agent)
+        return [
+            {
+                "name": s["name"],
+                "title": s.get("title"),
+                "created_at": s.get("created_at"),
+                "updated_at": s.get("updated_at"),
+            }
+            for s in sessions
+        ]
 
     @app.get("/agents/{agent_name}/sessions/{session_name}/history")
     async def get_session_history(agent_name: str, session_name: str):
@@ -197,7 +212,9 @@ def create_app(
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         session_name = uuid.uuid4().hex[:8]
-        (agent.path / "sessions" / session_name).mkdir(parents=True, exist_ok=True)
+        session_dir = agent.path / "sessions" / session_name
+        session_dir.mkdir(parents=True, exist_ok=True)
+        ensure_session_meta(session_dir)
         return {"name": session_name}
 
     @app.websocket("/ws")
@@ -237,6 +254,10 @@ def create_app(
                 await websocket.close(code=4404)
                 return
 
+            session_dir = agent.path / "sessions" / session_name
+            session_dir.mkdir(parents=True, exist_ok=True)
+            ensure_session_meta(session_dir)
+
             session_path = None
             if session_file:
                 candidate = agent.path / "sessions" / session_name / session_file
@@ -275,6 +296,9 @@ def create_app(
                     images = msg.get("images")
                     if not prompt and not images:
                         continue
+                    if prompt:
+                        update_session_title_from_prompt(session_dir, prompt)
+                    update_session_meta(session_dir)
                     payload = {"type": "prompt", "message": prompt}
                     if images:
                         payload["images"] = images
