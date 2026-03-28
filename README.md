@@ -11,7 +11,7 @@ Simply put, pipal is a wrapper around [pi-coding-agent](https://github.com/badlo
 
 ## Installation
 
-Before, installing **pipal** you need to have both [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) and [uv](https://docs.astral.sh/uv/getting-started/installation/). If you are installing pi-coding-agent for the first time, you would need to first login to a model provider using the `/login` command in a pi session - simply follow the instructions in the [Quick Start section of the pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
+Before, installing **pipal** you need to have both [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 
 Install pipal (recommended):
@@ -28,7 +28,9 @@ uv tool install -e .
 
 ## Quick Start
 
+If you are installing pi-coding-agent for the first time, you would need to first login to a model provider using the `/login` command in a pi session - simply follow the instructions in the [Quick Start section of the pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
 
+Once pi is connected to a provider, you can create and agent and start chatting with it:
 
 ```bash
 pipal agent create momo
