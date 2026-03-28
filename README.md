@@ -6,17 +6,10 @@
 
 ## Installation
 
-1) Install pi:
-```bash
-npm install -g @mariozechner/pi-coding-agent
-```
+Before, installing **pipal** you need to have both [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) and [uv](https://docs.astral.sh/uv/getting-started/installation/). If you are installing pi-coding-agent for the first time, you would need to first login to a model provider using the `/login` command in a pi session - simply follow the instructions in the [Quick Start section of the pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
 
-2) Install uv:
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
 
-3) Install pipal (recommended):
+Install pipal (recommended):
 ```bash
 uv tool install git+https://github.com/mohammadbashiri/pipal.git
 ```
@@ -28,13 +21,9 @@ cd pipal
 uv tool install -e .
 ```
 
-If you update dependencies in `pyproject.toml`, reinstall the tool env:
-```bash
-uv tool uninstall pipal
-uv tool install -e .
-```
-
 ## Quick Start
+
+
 
 ```bash
 pipal agent create momo
@@ -84,24 +73,26 @@ It will optionally remove:
 - the local pipal data directory (`~/.pipal`)
 - the pipal CLI (`uv tool uninstall pipal`)
 
-## Docker quickstart
+## Running pipal using Docker
 
 Clone this repo (Dockerfile required).
 
-Create local data directories (so state persists across runs):
+```bash
+git clone https://github.com/mohammadbashiri/pipal
+cd pipal
+```
+
+Create new local data directories (so state persists across runs):
 ```bash
 mkdir -p ~/.pipal-docker ~/.pi-docker
 ```
 
-Run any pipal command via Docker:
+Build the image locally:
 ```bash
-docker run -it --rm \
-  -v ~/.pipal-docker:/home/pipal/.pipal \
-  -v ~/.pi-docker:/home/pipal/.pi \
-  pipal:latest agent chat momo
+docker build -t pipal:latest .
 ```
 
-If you need to log in to pi inside the container:
+We need to connect pi to a model provider. The following will open a pi session in the docker container, and you can the `/login` command to connect pi to provider:
 ```bash
 docker run -it --rm \
   -v ~/.pipal-docker:/home/pipal/.pipal \
@@ -110,12 +101,23 @@ docker run -it --rm \
   pipal:latest
 ```
 
-See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, etc.).
-
-To build the image locally:
+Then you can run any pipal command via Docker (first would probably creating an agent):
 ```bash
-docker build -t pipal:latest .
+docker run -it --rm \
+  -v ~/.pipal-docker:/home/pipal/.pipal \
+  -v ~/.pi-docker:/home/pipal/.pi \
+  pipal:latest agent create momo
 ```
+
+But of course you can also just chat if you already created an agent:
+```bash
+docker run -it --rm \
+  -v ~/.pipal-docker:/home/pipal/.pipal \
+  -v ~/.pi-docker:/home/pipal/.pi \
+  pipal:latest agent chat momo
+```
+
+See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, etc.).
 
 ## Tasks (coming soon)
 
