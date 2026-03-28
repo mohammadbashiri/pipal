@@ -2,7 +2,12 @@
   <img src="assets/pipal_logo_cropped.png" alt="pipal logo" width="220" />
 </p>
 
-<p align="center">π-pal is a Persistent Agent Layer on top of <a href="https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent">pi-coding-agent</a></p>
+<p align="center">pipal is a Persistent Agent Layer on top of <a href="https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent">pi-coding-agent</a></p>
+
+## What is pipal?
+
+Simply put, pipal is a wrapper around [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) that helps agents adapt to you and grow with you, by giving pi agents persistence, memory, and personality.
+
 
 ## Installation
 
@@ -122,8 +127,3 @@ See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, et
 ## Tasks (coming soon)
 
 `src/pipal/templates/default/task.md` is the template that will be used when task support lands.
-
-## Notes
-
-- pipal depends on pi for models, login, and tool execution.
-- If no models are available, run `pi` and complete `/login` first.
