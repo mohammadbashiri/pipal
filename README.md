@@ -11,7 +11,7 @@ Simply put, pipal is a wrapper around [pi-coding-agent](https://github.com/badlo
 
 ## Installation
 
-Before, installing **pipal** you need to have both [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Before installing **pipal** you need to have both [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) and [uv](https://docs.astral.sh/uv/getting-started/installation/) installed.
 
 
 Install pipal (recommended):
@@ -28,9 +28,9 @@ uv tool install -e .
 
 ## Quick Start
 
-If you are installing pi-coding-agent for the first time, you would need to first login to a model provider using the `/login` command in a pi session - simply follow the instructions in the [Quick Start section of the pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
+If you are installing pi-coding-agent for the first time, you would need to first connect to a model provider using the `/login` command in a pi session - simply follow the instructions in the [pi-coding-agent's Quick Start](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
 
-Once pi is connected to a provider, you can create and agent and start chatting with it:
+Once pi is connected to a provider, you can create a pipal agent and start chatting with it:
 
 ```bash
 pipal agent create momo
@@ -99,7 +99,7 @@ Build the image locally:
 docker build -t pipal:latest .
 ```
 
-We need to connect pi to a model provider. The following will open a pi session in the docker container, and you can the `/login` command to connect pi to provider:
+We need to connect pi to a model provider. The following will open a pi session in the docker container, and you can use the `/login` command to connect pi to provider:
 ```bash
 docker run -it --rm \
   -v ~/.pipal-docker:/home/pipal/.pipal \
