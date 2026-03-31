@@ -19,7 +19,14 @@ pipal = "pipal.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.27.0",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: integration tests (need pi/pipal installed, run with: uv run pytest -m integration)",
+]
+addopts = "-m 'not integration'"
 
 [build-system]
 requires = ["uv_build>=0.9.16,<0.10.0"]
