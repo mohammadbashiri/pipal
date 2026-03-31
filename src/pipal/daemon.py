@@ -149,6 +149,7 @@ def _run_loop(
     print(f"[{datetime.now().isoformat()}] Daemon started for {agent_name} "
           f"(every {format_interval(interval)})", flush=True)
 
+    next_tick = time.time() + interval
     while True:
         try:
             ok, reason = _daemon_guard(agent_path, os.getpid())
@@ -221,7 +222,9 @@ def _run_loop(
         except Exception as e:
             print(f"[{datetime.now().isoformat()}] Error: {e}", flush=True)
 
-        time.sleep(interval)
+        sleep_for = max(0, next_tick - time.time())
+        time.sleep(sleep_for)
+        next_tick += interval
 
 
 # ── public API (called from cli.py) ─────────────────────────────
