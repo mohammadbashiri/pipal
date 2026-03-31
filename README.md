@@ -126,6 +126,39 @@ docker run -it --rm \
 
 See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, etc.).
 
-## Tasks (coming soon)
+## Tasks
 
-`src/pipal/templates/default/task.md` is the template that will be used when task support lands.
+pipal supports scheduled and one-off tasks that agents can execute.
+
+```bash
+# List all tasks
+pipal task list
+
+# List tasks for a specific agent
+pipal task list --agent momo
+
+# Run a task
+pipal task run <task_id> --agent momo
+
+# Check task status
+pipal task status
+
+# Remove a task
+pipal task remove <task_id> --agent momo
+```
+
+Tasks are stored as markdown files with YAML frontmatter under `tasks/` (per-agent or global). Use the daemon to run scheduled tasks automatically:
+
+```bash
+# Start daemon (runs due tasks on interval)
+pipal daemon start --agent momo --every 30m
+
+# Check daemon status
+pipal daemon status --agent momo
+
+# View daemon logs
+pipal daemon logs --agent momo
+
+# Stop daemon
+pipal daemon stop --agent momo
+```
