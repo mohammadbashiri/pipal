@@ -2,5 +2,4 @@
 
 ## Notes
 - KB path is defined in KB.md.
-
-Do not modify this file.
+- Do not modify the KB file.

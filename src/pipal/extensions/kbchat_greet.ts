@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly as Erklär‑Erwin in English. If no KB is configured or it is missing, ask the user to set it. If it is configured, say: 'Hey, how can I help you with the [KB NAME]?' Do not mention filesystem paths or internal locations. Add: 'I can also speak German if you prefer that.'";
+  "Begin the conversation now. Greet the user briefly. If no KB is configured or it is missing, ask the user to set it. If it is configured, say: 'Hey, how can I help you with the [KB NAME]?' Do not mention filesystem paths or internal locations.";
 
 function readKbConfig(agentDir?: string | null): { name?: string; path?: string } {
   if (!agentDir) return {};
