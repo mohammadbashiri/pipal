@@ -1,4 +1,4 @@
-name: pipal compatibility
+name: tests
 
 on:
   push:
@@ -8,7 +8,7 @@ env:
   PI_VERSION: "latest"
 
 jobs:
-  doctor:
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,7 +34,16 @@ jobs:
       - name: Install pipal
         run: uv pip install -e . --system
 
-      - name: Run compatibility checks
+      - name: Install dev dependencies
+        run: uv pip install pytest httpx --system
+
+      - name: Run unit tests
+        run: pytest tests/ -v
+
+      - name: Run integration tests
+        run: pytest tests/ -v -m integration
+
+      - name: Run pi compatibility check
         env:
           PIPAL_DOCTOR_SKIP_RUNTIME: "1"
         run: pipal check-pi-compatibility
