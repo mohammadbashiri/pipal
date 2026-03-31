@@ -32,7 +32,7 @@ Agent types are implemented as **template folders**. Each type defines a set of 
 - Templates live under:
   - `src/pipal/templates/<type>/`
 - Core files include:
-  - `AGENTS.md`, `IDENTITY.md`, `POLICY.md`, `USER.md`, `MEMORY.md`, `JOURNAL.md`
+  - `AGENTS.md`, `IDENTITY.md`, `POLICY.md`, `USER.md`, `MEMORY.md`
   - type‑specific files (e.g. `KB.md` for kbchat)
 
 When you run `pipal agent create`, pipal selects the template folder for the given `--type` and copies those files into:
@@ -47,7 +47,7 @@ For **kbchat**, the `--kb` flag is used to populate the KB path, which is writte
 ~/.pipal/agents/<agent_name>/KB.md
 ```
 
-## KB Chat (Erklär‑Erwin)
+## KB Chat
 
 Create a knowledge‑base agent (kbchat):
 
@@ -60,3 +60,9 @@ This writes the KB path into:
 ```
 ~/.pipal/agents/erwin/KB.md
 ```
+
+### Model requirements
+
+kbchat agents rely on tool calling (`read`, `grep`, `find`, `ls`) to navigate the knowledge base. This requires a model with strong tool-calling support. Small models (< 7B parameters) may ignore tool instructions and hallucinate answers instead of reading the KB.
+
+Recommended: use a capable model (e.g. Claude, GPT, or Ollama models ≥ 20B with tool-calling support like `qwen3-coder:30b` or `gpt-oss:20b`).
