@@ -5,18 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from .runner import PERSONA_FILES
+from .runner import load_persona as _load_persona, _read_agent_type as read_agent_type
 
 
 def load_persona(agent_dir: Path) -> str:
-    parts: list[str] = []
-    for name in PERSONA_FILES:
-        path = agent_dir / name
-        if path.exists():
-            text = path.read_text(encoding="utf-8").strip()
-            if text:
-                parts.append(text)
-    return "\n\n---\n\n".join(parts)
+    return _load_persona(str(agent_dir))
 
 
 def load_summary(agent_dir: Path, session_name: str = "main") -> str:
@@ -114,11 +107,4 @@ def new_session_file(agent_dir: Path, session_name: str) -> Path:
     return session_file
 
 
-def read_agent_type(agent_dir: Path) -> str | None:
-    type_path = agent_dir / ".pipal_type"
-    if not type_path.exists():
-        return None
-    try:
-        return type_path.read_text(encoding="utf-8").strip() or None
-    except OSError:
-        return None
+
