@@ -4,6 +4,11 @@
 
 <p align="center">pipal is a Persistent Agent Layer on top of <a href="https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent">pi-coding-agent</a></p>
 
+<p align="center">
+  <a href="https://github.com/mohammadbashiri/pipal/actions/workflows/tests.yml"><img src="https://github.com/mohammadbashiri/pipal/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
+  <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="python">
+</p>
+
 ## What is pipal?
 
 Simply put, pipal is a wrapper around [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) that helps agents adapt to you and grow with you, by giving pi agents persistence, memory, and personality.
