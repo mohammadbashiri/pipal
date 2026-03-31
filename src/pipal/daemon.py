@@ -44,15 +44,6 @@ def _is_running(pid: int) -> bool:
         return False
 
 
-def _find_project_root() -> Path:
-    d = Path(__file__).resolve().parent
-    while d != d.parent:
-        if (d / "pyproject.toml").exists():
-            return d
-        d = d.parent
-    raise FileNotFoundError("Could not find pyproject.toml")
-
-
 def _routine_files(agent_path: str) -> list[Path]:
     routines = Path(agent_path) / "routines"
     if not routines.exists():
@@ -130,8 +121,6 @@ def _run_loop(
     agent_name: str,
     agent_path: str,
     interval: int,
-    uv_bin: str,
-    project_root: str,
 ):
     """Infinite heartbeat loop.  Runs inside the detached process."""
 
@@ -188,14 +177,17 @@ def _run_loop(
                     every_label = format_interval(every) if every else "unknown"
                     print(f"Running task: {task_id} (every {every_label})", flush=True)
                     try:
+                        pipal_bin = shutil.which("pipal")
+                        if not pipal_bin:
+                            print("TASK_FAIL pipal binary not found on PATH", flush=True)
+                            continue
                         result = subprocess.run(
                             [
-                                uv_bin, "run", "pipal",
+                                pipal_bin,
                                 "task", "run",
                                 task_id,
                                 "--agent", agent_name,
                             ],
-                            cwd=project_root,
                             capture_output=True,
                             text=True,
                             timeout=300,  # 5 min max per task
@@ -248,11 +240,6 @@ def start_daemon(agent_name: str, agent_path: str, interval: int):
             pass
         pid_file.unlink(missing_ok=True)
 
-    uv_bin = shutil.which("uv")
-    if not uv_bin:
-        raise FileNotFoundError("Could not find uv. Is it installed?")
-
-    project_root = _find_project_root()
     log_file = _log_path(agent_path)
 
     log_fd = open(log_file, "a")
@@ -263,8 +250,6 @@ def start_daemon(agent_name: str, agent_path: str, interval: int):
             "--agent-name", agent_name,
             "--agent-path", agent_path,
             "--interval", str(interval),
-            "--uv-bin", uv_bin,
-            "--project-root", str(project_root),
         ],
         start_new_session=True,
         stdout=log_fd,
@@ -348,14 +333,10 @@ if __name__ == "__main__":
     p.add_argument("--agent-name", required=True)
     p.add_argument("--agent-path", required=True)
     p.add_argument("--interval", type=int, required=True)
-    p.add_argument("--uv-bin", required=True)
-    p.add_argument("--project-root", required=True)
     args = p.parse_args()
 
     _run_loop(
         agent_name=args.agent_name,
         agent_path=args.agent_path,
         interval=args.interval,
-        uv_bin=args.uv_bin,
-        project_root=args.project_root,
     )
