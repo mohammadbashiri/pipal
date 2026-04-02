@@ -96,6 +96,17 @@ Pass a custom base path to override the default:
 pipal agent create momo /path/to/agents
 ```
 
+## Uninstall
+
+Run the interactive uninstaller (choose which components to remove):
+```bash
+pipal uninstall
+```
+
+It will optionally remove:
+- the local pipal data directory (`~/.pipal`)
+- the pipal CLI (`uv tool uninstall pipal`)
+
 ## Running pipal using Docker
 
 Clone this repo (Dockerfile required).
@@ -141,14 +152,3 @@ docker run -it --rm \
 ```
 
 See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, etc.).
-
-## Uninstall
-
-Run the interactive uninstaller (choose which components to remove):
-```bash
-pipal uninstall
-```
-
-It will optionally remove:
-- the local pipal data directory (`~/.pipal`)
-- the pipal CLI (`uv tool uninstall pipal`)
