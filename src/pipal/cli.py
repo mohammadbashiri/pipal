@@ -582,9 +582,9 @@ def main(argv=None):
                     return 2
 
             if not provider or not model:
-                print("[red]Missing model info.[/red] Use either:")
-                print(f'  pipal agent set-llm {args.name} --provider ollama --model "Mistral:7b"')
-                print(f'  pipal agent set-llm {args.name} "ollama:Mistral:7b"')
+                if _interactive_set_llm(a["path"], args.name):
+                    return 0
+                print("[red]Model selection required.[/red]")
                 return 2
 
             written = write_llm_json(a["path"], provider, model)
