@@ -133,37 +133,12 @@ See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, et
 
 ## Tasks
 
-pipal supports scheduled and one-off tasks that agents can execute.
+pipal supports scheduled and one-off tasks that agents can execute — manually or automatically via the daemon.
 
 ```bash
-# List all tasks
-pipal task list
-
-# List tasks for a specific agent
-pipal task list --agent momo
-
-# Run a task
-pipal task run <task_id> --agent momo
-
-# Check task status
-pipal task status
-
-# Remove a task
-pipal task remove <task_id> --agent momo
+pipal task list --agent momo          # list tasks
+pipal task run daily-check --agent momo  # run a task manually
+pipal daemon start --agent momo --every 30m  # run due tasks on schedule
 ```
 
-Tasks are stored as markdown files with YAML frontmatter under `tasks/` (per-agent or global). Use the daemon to run scheduled tasks automatically:
-
-```bash
-# Start daemon (runs due tasks on interval)
-pipal daemon start --agent momo --every 30m
-
-# Check daemon status
-pipal daemon status --agent momo
-
-# View daemon logs
-pipal daemon logs --agent momo
-
-# Stop daemon
-pipal daemon stop --agent momo
-```
+See [docs/tasks.md](docs/tasks.md) for full documentation: task format, scheduling syntax, model overrides, and daemon usage.

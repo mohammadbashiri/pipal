@@ -4,6 +4,8 @@ title: {title}
 status: {status}
 assigned_to: {assigned_to}
 schedule: {schedule}
+provider: null
+model: null
 ---
 
 # Task
