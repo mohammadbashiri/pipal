@@ -81,6 +81,16 @@ Registry:
 ~/.pipal/agents.json
 ```
 
+Tasks (personal):
+```
+~/.pipal/agents/<agent_name>/tasks/
+```
+
+Tasks (global):
+```
+~/.pipal/tasks/
+```
+
 Pass a custom base path to override the default:
 ```
 pipal agent create momo /path/to/agents
