@@ -46,6 +46,18 @@ pipal agent chat momo
 
 pipal supports multiple agent types (different templates and behaviors). See [agent_types.md](agent_types.md).
 
+## Tasks
+
+pipal supports scheduled and one-off tasks that agents can execute — manually or automatically via the daemon.
+
+```bash
+pipal task list --agent momo             # list tasks
+pipal task run daily-check --agent momo  # run a task manually
+pipal daemon start --agent momo --every 30m  # run due tasks on schedule
+```
+
+See [docs/tasks.md](docs/tasks.md) for full documentation: task format, scheduling syntax, model overrides, and daemon usage.
+
 ## Server
 
 Run the HTTP/WS backend:
@@ -73,17 +85,6 @@ Pass a custom base path to override the default:
 ```
 pipal agent create momo /path/to/agents
 ```
-
-## Uninstall
-
-Run the interactive uninstaller (choose which components to remove):
-```bash
-pipal uninstall
-```
-
-It will optionally remove:
-- the local pipal data directory (`~/.pipal`)
-- the pipal CLI (`uv tool uninstall pipal`)
 
 ## Running pipal using Docker
 
@@ -131,14 +132,13 @@ docker run -it --rm \
 
 See [docs/docker.md](docs/docker.md) for more Docker commands (server, shell, etc.).
 
-## Tasks
+## Uninstall
 
-pipal supports scheduled and one-off tasks that agents can execute — manually or automatically via the daemon.
-
+Run the interactive uninstaller (choose which components to remove):
 ```bash
-pipal task list --agent momo          # list tasks
-pipal task run daily-check --agent momo  # run a task manually
-pipal daemon start --agent momo --every 30m  # run due tasks on schedule
+pipal uninstall
 ```
 
-See [docs/tasks.md](docs/tasks.md) for full documentation: task format, scheduling syntax, model overrides, and daemon usage.
+It will optionally remove:
+- the local pipal data directory (`~/.pipal`)
+- the pipal CLI (`uv tool uninstall pipal`)
