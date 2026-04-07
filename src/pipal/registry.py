@@ -35,6 +35,7 @@ def migrate_registry():
 
 
 def _rewrite_registry_paths(reg: dict) -> bool:
+    """Migrate legacy paths and convert absolute paths to relative."""
     agents = reg.get("agents", {})
     if not isinstance(agents, dict):
         return False
@@ -57,14 +58,27 @@ def _rewrite_registry_paths(reg: dict) -> bool:
         if not isinstance(path, str):
             continue
 
+        entry_changed = False
+
+        # Migrate old .pal paths
         if path.startswith(old_prefix):
-            updated = new_prefix + path[len(old_prefix):]
+            path = new_prefix + path[len(old_prefix):]
+            entry_changed = True
+
+        # Convert absolute paths to relative (portability fix)
+        if Path(path).is_absolute():
+            rel = _to_relative(path)
+            if rel != path:
+                path = rel
+                entry_changed = True
+
+        if entry_changed:
+            changed = True
             if entry_container is not None:
-                entry_container["path"] = updated
+                entry_container["path"] = path
                 agents[name] = entry_container
             else:
-                agents[name] = updated
-            changed = True
+                agents[name] = path
 
     return changed
 
@@ -101,6 +115,21 @@ def _entry_to_path(entry):
     if isinstance(entry, dict): return entry.get("path")
     return None
 
+def _to_relative(path: str) -> str:
+    """Store paths relative to pipal_dir() so the registry is portable."""
+    try:
+        return str(Path(path).relative_to(pipal_dir()))
+    except ValueError:
+        # Path is outside pipal_dir (custom location) — keep absolute
+        return path
+
+def _resolve_path(rel_or_abs: str) -> str:
+    """Resolve a registry path: relative paths are anchored to pipal_dir()."""
+    p = Path(rel_or_abs)
+    if p.is_absolute():
+        return str(p)
+    return str(pipal_dir() / p)
+
 def add_agent(name, path):
     p = registry_path()
 
@@ -112,13 +141,13 @@ def add_agent(name, path):
     reg = load_registry()
     reg.setdefault("agents", {})
 
-    path = norm_abs(path)
-    reg["agents"][name] = path
+    abs_path = norm_abs(path)
+    reg["agents"][name] = _to_relative(abs_path)
 
     save_registry(reg)
 
     return {
-        "path": path,
+        "path": abs_path,
         "registry_created": created
     }
 
@@ -137,7 +166,7 @@ def list_agents():
     out = {}
     for name, entry in reg.get("agents", {}).items():
         p = _entry_to_path(entry)
-        if p: out[name] = str(Path(p).expanduser().resolve())
+        if p: out[name] = _resolve_path(p)
     return out
 
 def get_agent(name):
@@ -145,5 +174,4 @@ def get_agent(name):
     entry = reg.get("agents", {}).get(name)
     p = _entry_to_path(entry)
     if not p: return None
-    p = Path(p).expanduser().resolve()
-    return {"name": name, "path": str(p)}
+    return {"name": name, "path": _resolve_path(p)}
