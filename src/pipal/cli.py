@@ -569,8 +569,6 @@ def main(argv=None):
                 print(f"[red]Unknown agent[/red] {args.name}. Run: pipal agent list")
                 return 2
 
-            ensure_agent_scaffold(a["path"], name=args.name)
-
             provider = args.provider
             model = args.model
 
