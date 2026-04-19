@@ -1,5 +1,4 @@
 # MEMORY.md
 
 ## Notes
-- KB path is defined in KB.md.
-- Do not modify the KB file.
+- Do not modify KB files.
