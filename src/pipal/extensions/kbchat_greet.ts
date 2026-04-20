@@ -2,8 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const GREET_INSTRUCTION =
-  "Begin the conversation now. Greet the user briefly. If no KB is configured or it is missing, ask the user to set it. If it is configured, say: 'Hey, how can I help you with the [KB NAME]?' Do not mention filesystem paths or internal locations.";
+const GREET_INSTRUCTION_KB_READY = (kbName: string) =>
+  `Greet the user now with exactly: "Hey, how can I help you with the ${kbName}?" Nothing else.`;
+const GREET_INSTRUCTION_KB_MISSING =
+  "Greet the user briefly, then tell them the knowledge base path is configured but the files were not found.";
+const GREET_INSTRUCTION_KB_UNCONFIGURED =
+  "Greet the user briefly, then tell them no knowledge base is configured yet.";
 
 function readKbConfig(agentDir?: string | null): { name?: string; path?: string } {
   if (!agentDir) return {};
@@ -67,13 +71,15 @@ export default function (pi: ExtensionAPI) {
       ? { triggerTurn: true }
       : { deliverAs: "followUp" as const, triggerTurn: true };
 
-    let kbLine = "KB is not configured";
+    let instruction: string;
     if (hasPath && kbExists) {
-      kbLine = `KB name: ${kbName}`;
+      instruction = GREET_INSTRUCTION_KB_READY(kbName);
     } else if (hasPath && !kbExists) {
-      kbLine = "KB path is configured but not found";
+      instruction = GREET_INSTRUCTION_KB_MISSING;
+    } else {
+      instruction = GREET_INSTRUCTION_KB_UNCONFIGURED;
     }
-    const content = `${GREET_INSTRUCTION}\n\n${kbLine}\n\nKB NAME: ${kbName}`;
+    const content = instruction;
 
     pi.sendMessage(
       {
