@@ -123,6 +123,10 @@ pipal includes an HTTP/WebSocket server (`pipal serve`) built with FastAPI:
 - **Auth** — optional bearer token via `PIPAL_AUTH_TOKEN` env var
 - **Read-only mode** — history-only, no prompts
 
+Security note:
+- `pipal serve` defaults to localhost bind for safer local usage.
+- If you bind publicly (`0.0.0.0`/non-loopback), use `PIPAL_AUTH_TOKEN` and network protections.
+
 ## LLM configuration
 
 Each agent has an `llm.json`:
