@@ -7,9 +7,7 @@ from pipal.registry import (
     list_agents,
     get_agent,
     load_registry,
-    save_registry,
     registry_path,
-    pipal_dir,
 )
 
 
@@ -65,3 +63,38 @@ def test_add_overwrites_existing(tmp_path):
     add_agent("dave", str(tmp_path / "new"))
     agent = get_agent("dave")
     assert "new" in agent["path"]
+
+
+def test_load_registry_handles_invalid_json(tmp_path):
+    p = registry_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{not-json", encoding="utf-8")
+
+    reg = load_registry()
+    assert reg == {"agents": {}}
+
+
+def test_load_registry_handles_non_mapping_payload(tmp_path):
+    p = registry_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(["not", "a", "dict"]))
+
+    reg = load_registry()
+    assert reg == {"agents": {}}
+
+
+def test_load_registry_migrates_legacy_pal_paths(tmp_path, monkeypatch):
+    old_home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: old_home)
+    monkeypatch.setenv("PIPAL_HOME", str(old_home / ".pipal"))
+
+    reg_path = old_home / ".pipal" / "agents.json"
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path = str((old_home / ".pal" / "agents" / "momo").resolve())
+    reg_path.write_text(json.dumps({"agents": {"momo": legacy_path}}), encoding="utf-8")
+
+    reg = load_registry()
+    assert reg["agents"]["momo"].startswith("agents/")
+    agent = get_agent("momo")
+    assert agent is not None
+    assert str(old_home / ".pipal" / "agents" / "momo") == agent["path"]

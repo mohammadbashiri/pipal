@@ -48,6 +48,7 @@ def _read_session_meta(session_dir: Path) -> dict:
 
 
 def _write_session_meta(session_dir: Path, meta: dict) -> None:
+    session_dir.mkdir(parents=True, exist_ok=True)
     meta_path = _session_meta_path(session_dir)
     meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -105,6 +106,5 @@ def new_session_file(agent_dir: Path, session_name: str) -> Path:
     session_file = sessions_dir / f"{ts}.jsonl"
     update_session_meta(sessions_dir)
     return session_file
-
 
 
