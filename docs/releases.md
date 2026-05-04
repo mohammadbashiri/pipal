@@ -4,10 +4,15 @@
 
 `pipal` is a thin wrapper over `pi-coding-agent`, so compatibility is a release gate.
 
-| pipal version | tested pi-coding-agent version | notes |
+### Support policy
+
+- Minimum supported `pi-coding-agent` version: `0.66.1`
+- CI-tested targets: pinned `0.66.1` and `latest`
+
+| pipal version | minimum supported pi version | CI-tested pi versions | notes |
 |---|---|---|
-| 0.1.0 | latest (CI `PI_VERSION=latest`) | baseline compatibility checks in CI |
-| unreleased (`main`) | latest (CI `PI_VERSION=latest`) | validate before tagging |
+| 0.1.0 | 0.66.1 | 0.66.1, latest | baseline compatibility checks in CI |
+| unreleased (`main`) | 0.66.1 | 0.66.1, latest | validate before tagging |
 
 When a pipal release is cut, update this table with the exact pipal tag and the tested `pi` version(s).
 

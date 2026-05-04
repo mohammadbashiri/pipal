@@ -54,6 +54,7 @@ pipal check-pi-compatibility
 ```
 
 If the check fails, follow the suggested fixes shown by the command and rerun it.
+See [docs/releases.md](docs/releases.md) for supported/tested `pi` versions.
 
 For local development (editable install):
 ```bash
