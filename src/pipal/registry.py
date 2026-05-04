@@ -87,8 +87,15 @@ def load_registry():
     migrate_registry()
     p = registry_path()
     if not p.exists(): return {"agents": {}}
-    with p.open("r", encoding="utf-8") as f:
-        reg = json.load(f)
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            reg = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        reg = {"agents": {}}
+    if not isinstance(reg, dict):
+        reg = {"agents": {}}
+    if not isinstance(reg.get("agents"), dict):
+        reg["agents"] = {}
     if _rewrite_registry_paths(reg):
         save_registry(reg)
     return reg
