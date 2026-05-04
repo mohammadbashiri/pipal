@@ -45,6 +45,13 @@ For any non-local exposure:
 - run behind network controls (VPN/firewall/reverse proxy auth/TLS)
 - do not expose unauthenticated `pipal serve` on the public internet
 
+Pre-exposure verification checklist:
+1. Server bind is intentional (`--host 0.0.0.0` or non-loopback only when needed).
+2. `PIPAL_AUTH_TOKEN` is set and kept secret.
+3. External access is filtered (firewall/VPN/reverse proxy policy).
+4. TLS is enabled at ingress/reverse proxy for untrusted networks.
+5. You have tested that unauthenticated requests are rejected.
+
 ## Hardening notes
 
 Current server behavior:
