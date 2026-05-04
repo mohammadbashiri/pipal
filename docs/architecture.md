@@ -2,6 +2,15 @@
 
 pipal is a persistence layer on top of [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). It gives pi agents identity, memory, and continuity across sessions.
 
+Deployment model:
+- local-first
+- single-user
+- optional local API server
+
+Non-goals (current):
+- multi-tenant orchestration platform
+- enterprise IAM/compliance system
+
 ## Overview
 
 ```

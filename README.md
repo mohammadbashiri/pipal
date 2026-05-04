@@ -37,6 +37,22 @@ For normal usage, the operational rule is:
 
 > If `pi` works in your environment, `pipal` should work too.
 
+## Intended deployment model
+
+`pipal` is designed for local-first, single-user usage:
+- one human user
+- local workstation/laptop/dev box
+- local files as durable memory/session state
+
+The optional server is primarily a local API surface for that same single-user workflow.
+
+## Not for
+
+`pipal` is not currently intended to be:
+- a multi-tenant agent platform
+- an enterprise identity/compliance product
+- a hardened internet-facing control plane
+
 ## Installation
 
 Before installing **pipal**, install:
