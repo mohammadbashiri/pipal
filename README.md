@@ -77,6 +77,13 @@ pipal agent chat momo
 
 pipal supports multiple agent types (different templates and behaviors). See [agent_types.md](agent_types.md).
 
+## Compatibility and releases
+
+See [docs/releases.md](docs/releases.md) for:
+- pipal ↔ pi compatibility matrix
+- release checklist
+- changelog discipline
+
 ## Tasks
 
 pipal supports scheduled and one-off tasks that agents can execute — manually or automatically via the daemon.
