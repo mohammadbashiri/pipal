@@ -173,6 +173,12 @@ If the server is reachable from other machines:
 - prefer network-level protections (VPN, firewall, reverse proxy auth)
 - avoid exposing unauthenticated `pipal serve` to the public internet
 
+Pre-exposure checklist:
+1. `pipal serve` is started with non-loopback host only intentionally.
+2. `PIPAL_AUTH_TOKEN` is set to a long random value.
+3. Access is restricted by network controls (firewall/VPN/reverse proxy).
+4. TLS is terminated at a trusted ingress/reverse proxy when crossing untrusted networks.
+
 ## Storage
 
 By default, agents are created under:
