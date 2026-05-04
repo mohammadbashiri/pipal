@@ -19,6 +19,8 @@ from pathlib import Path
 
 from .tasks import list_tasks, load_task, is_task_due, schedule_seconds
 
+TASK_RUN_TIMEOUT_SECONDS = 300
+
 
 # ── paths ────────────────────────────────────────────────────────
 
@@ -74,7 +76,7 @@ def _daemon_guard(agent_path: str, current_pid: int) -> tuple[bool, str]:
 
 def parse_interval(s: str) -> int:
     """Parse '30m', '1h', '2h30m', '90s' into seconds."""
-    s = s.strip().lower()
+    s = re.sub(r"\s+", "", s.strip().lower())
     m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", s)
     if not m or not any(m.groups()):
         raise ValueError(f"Invalid interval: {s}. Use e.g. 30m, 1h, 2h30m")
@@ -191,7 +193,7 @@ def _run_loop(
                             ],
                             capture_output=True,
                             text=True,
-                            timeout=300,  # 5 min max per task
+                            timeout=TASK_RUN_TIMEOUT_SECONDS,
                         )
 
                         output = (result.stdout or "").strip()
@@ -199,12 +201,17 @@ def _run_loop(
                             print(output, flush=True)
                         else:
                             print("TASK_FAIL No output from task run", flush=True)
+                        if result.returncode != 0:
+                            print(
+                                f"TASK_FAIL {task_id} exited with code {result.returncode}",
+                                flush=True,
+                            )
 
                         if result.stderr:
                             print(result.stderr, flush=True)
                     except subprocess.TimeoutExpired:
                         print(
-                            f"TASK_FAIL {task_id} timed out after 300s",
+                            f"TASK_FAIL {task_id} timed out after {TASK_RUN_TIMEOUT_SECONDS}s",
                             flush=True,
                         )
 

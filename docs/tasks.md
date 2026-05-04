@@ -122,6 +122,12 @@ pipal daemon stop --agent momo
 
 The daemon fires at precise absolute intervals — if a task takes 10 seconds to run with a 60-second interval, the next tick still fires at 60 seconds, not 70.
 
+### Runtime limits and failure signals
+
+- Each task run has a 5-minute timeout.
+- If a task process exits non-zero, the daemon logs a `TASK_FAIL` line with the exit code.
+- If a task produces no output, the daemon logs `TASK_FAIL No output from task run`.
+
 ## Output format
 
 Tasks must return exactly one line in the following format:
