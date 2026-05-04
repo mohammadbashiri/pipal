@@ -31,6 +31,31 @@ REQUIRED_FLAGS = [
     "--tools",
 ]
 
+REMEDIATION = {
+    "pi binary": [
+        "Install pi-coding-agent, then verify it is on PATH: `pi --version`",
+    ],
+    "pi --version": [
+        "Run `pi --version` directly and fix your pi installation/provider setup.",
+    ],
+    "pi --help": [
+        "Run `pi --help` directly. If it fails, reinstall/update pi-coding-agent.",
+    ],
+    "required flags": [
+        "Update pi-coding-agent to a version that supports pipal's required CLI flags.",
+    ],
+    "prompt flag": [
+        "Your pi build must support `-p` or `--prompt` for one-shot task execution.",
+    ],
+    "rpc mode": [
+        "Your pi build must support `--mode rpc` for `pipal serve` WebSocket chat.",
+    ],
+    "rpc start": [
+        "Ensure at least one agent has `llm.json` (run `pipal agent set-llm <agent> \"provider:model\"`).",
+        "If provider auth is missing, open `pi` and complete `/login`.",
+    ],
+}
+
 
 @dataclass
 class CheckResult:
@@ -69,23 +94,6 @@ def _check_rpc_mode(help_text: str) -> bool:
     if "rpc" in help_text.lower():
         return True
     return False
-
-
-def _resolve_windows_pi(pi_bin: str) -> str:
-    if os.name != "nt":
-        return pi_bin
-    lower = pi_bin.lower()
-    if lower.endswith((".cmd", ".exe", ".bat")):
-        return pi_bin
-    for ext in (".cmd", ".exe", ".bat"):
-        candidate = pi_bin + ext
-        if os.path.exists(candidate):
-            return candidate
-    for name in ("pi.cmd", "pi.exe", "pi.bat", "pi"):
-        found = shutil.which(name)
-        if found:
-            return found
-    return pi_bin
 
 
 async def _run_rpc_check(agent_path: str, llm: dict) -> tuple[bool, str]:
@@ -175,6 +183,16 @@ def run_doctor(agent_name: str | None = None) -> int:
         line = f"[{color}]{symbol} {result.name}: {result.details}[/{color}]"
         console.print(f"{line}          ")
 
+    def print_remediation(result: CheckResult) -> None:
+        if result.ok:
+            return
+        tips = REMEDIATION.get(result.name, [])
+        if not tips:
+            return
+        console.print("[yellow]Suggested fix:[/yellow]")
+        for tip in tips:
+            console.print(f"  - {tip}")
+
     log_start("locate pi")
     try:
         pi_bin = _find_native_pi()
@@ -182,6 +200,7 @@ def run_doctor(agent_name: str | None = None) -> int:
         result = CheckResult("pi binary", False, str(exc))
         results.append(result)
         log_result(result)
+        print_remediation(result)
         return 2
 
     pi_bin = _resolve_windows_pi(pi_bin)
@@ -201,6 +220,7 @@ def run_doctor(agent_name: str | None = None) -> int:
         result = CheckResult("pi --version", True, _format_output(version_proc))
     results.append(result)
     log_result(result)
+    print_remediation(result)
 
     log_start("pi --help")
     help_proc = _run([pi_bin, "--help"])
@@ -213,6 +233,7 @@ def run_doctor(agent_name: str | None = None) -> int:
         )
         results.append(result)
         log_result(result)
+        print_remediation(result)
         return 2
 
     log_start("required flags")
@@ -227,21 +248,25 @@ def run_doctor(agent_name: str | None = None) -> int:
         result = CheckResult("required flags", True, "All present")
     results.append(result)
     log_result(result)
+    print_remediation(result)
 
     log_start("prompt flag")
     result = CheckResult("prompt flag", _check_prompt_flag(help_text), "-p/--prompt found" if _check_prompt_flag(help_text) else "-p/--prompt missing")
     results.append(result)
     log_result(result)
+    print_remediation(result)
 
     log_start("rpc mode")
     result = CheckResult("rpc mode", _check_rpc_mode(help_text), "rpc mentioned in help" if _check_rpc_mode(help_text) else "rpc not found in help")
     results.append(result)
     log_result(result)
+    print_remediation(result)
 
     if skip_runtime:
         result = CheckResult("rpc start", True, "Skipped (PIPAL_DOCTOR_SKIP_RUNTIME=1)")
         results.append(result)
         log_result(result)
+        print_remediation(result)
     else:
         agent_info = _select_agent(agent_name)
         if not agent_info:
@@ -252,6 +277,7 @@ def run_doctor(agent_name: str | None = None) -> int:
             )
             results.append(result)
             log_result(result)
+            print_remediation(result)
             return 2
 
         agent_name, agent_path, llm = agent_info
@@ -263,9 +289,12 @@ def run_doctor(agent_name: str | None = None) -> int:
             result = CheckResult("rpc start", False, f"Exception: {exc}")
         results.append(result)
         log_result(result)
+        print_remediation(result)
 
     if any(not result.ok for result in results):
+        console.print("\n[red]Compatibility check failed.[/red] Resolve the failed checks and rerun:")
+        console.print("  [bold]pipal check-pi-compatibility[/bold]")
         return 2
+    console.print("\n[green]Compatibility check passed.[/green]")
     return 0
-
 

@@ -16,13 +16,21 @@ Simply put, pipal is a wrapper around [pi-coding-agent](https://github.com/badlo
 
 ## Installation
 
-Before installing **pipal** you need to have both [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) and [uv](https://docs.astral.sh/uv/getting-started/installation/) installed.
+Before installing **pipal**, install:
+- [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
-
-Install pipal (recommended):
+Install pipal:
 ```bash
 uv tool install git+https://github.com/mohammadbashiri/pipal.git
 ```
+
+Verify compatibility (canonical verification step):
+```bash
+pipal check-pi-compatibility
+```
+
+If the check fails, follow the suggested fixes shown by the command and rerun it.
 
 For local development (editable install):
 ```bash
@@ -35,7 +43,7 @@ uv tool install -e .
 
 If you are installing pi-coding-agent for the first time, you would need to first connect to a model provider using the `/login` command in a pi session - simply follow the instructions in the [pi-coding-agent's Quick Start](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
 
-Once pi is connected to a provider, you can create a pipal agent and start chatting with it:
+Once pi is connected to a provider, create and chat:
 
 ```bash
 pipal agent create momo
@@ -65,9 +73,42 @@ Run the HTTP/WS backend:
 pipal serve --port 8000
 ```
 
-If WebSockets fail, reinstall pipal via `uv tool install -e .` (it must install into the tool env).
+If WebSockets fail, reinstall pipal in the uv tool env:
+```bash
+uv tool install --force git+https://github.com/mohammadbashiri/pipal.git
+```
 
 On create, pipal will prompt you to pick a model from `pi --list-models` and write `llm.json`.
+
+## Troubleshooting
+
+### `pipal check-pi-compatibility` fails
+
+Run:
+```bash
+pipal check-pi-compatibility
+```
+
+Then apply the command's suggested fix (for example: missing `llm.json`, missing pi flags, or provider auth via `/login`) and rerun.
+
+### `pipal` command not found after install
+
+Verify uv tool path is on your shell `PATH`, then run:
+```bash
+uv tool list
+```
+
+### RPC/server chat does not start
+
+Common causes:
+- no agent has `llm.json`
+- provider auth not completed in `pi`
+- incompatible pi version missing RPC/CLI flags
+
+Re-run:
+```bash
+pipal check-pi-compatibility
+```
 
 ## Storage
 
