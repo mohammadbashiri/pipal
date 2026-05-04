@@ -98,6 +98,13 @@ Run the HTTP/WS backend:
 pipal serve --port 8000
 ```
 
+`pipal serve` binds to `127.0.0.1` by default.
+If you intentionally bind publicly (`--host 0.0.0.0`), set an auth token:
+```bash
+export PIPAL_AUTH_TOKEN="replace-with-long-random-token"
+pipal serve --host 0.0.0.0 --port 8000
+```
+
 If WebSockets fail, reinstall pipal in the uv tool env:
 ```bash
 uv tool install --force git+https://github.com/mohammadbashiri/pipal.git
@@ -134,6 +141,13 @@ Re-run:
 ```bash
 pipal check-pi-compatibility
 ```
+
+### Server exposure safety
+
+If the server is reachable from other machines:
+- set `PIPAL_AUTH_TOKEN`
+- prefer network-level protections (VPN, firewall, reverse proxy auth)
+- avoid exposing unauthenticated `pipal serve` to the public internet
 
 ## Storage
 

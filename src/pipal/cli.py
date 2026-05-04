@@ -114,7 +114,7 @@ def build_parser():
     pd_logs.add_argument("-n", type=int, default=50, help="Number of lines (default: 50)")
 
     psrv = sub.add_parser("serve", help="Run pipal HTTP/WS server")
-    psrv.add_argument("--host", default="0.0.0.0")
+    psrv.add_argument("--host", default="127.0.0.1")
     psrv.add_argument("--port", type=int, default=8000)
     psrv.add_argument("--agent", dest="serve_agent", default=None, help="Scope to one agent")
     psrv.add_argument("--session", dest="serve_session", default=None, help="Scope to one session")
@@ -768,5 +768,4 @@ def _interactive_set_llm(agent_path: str, name: str) -> bool:
     print(f"[green]Updated[/green] {written}")
     print(f"[cyan]LLM[/cyan] provider={provider} model={model}")
     return True
-
 

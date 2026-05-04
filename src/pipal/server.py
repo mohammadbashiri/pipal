@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+import ipaddress
 from pathlib import Path
 from typing import Optional
 
@@ -328,6 +329,19 @@ def run_server(
     read_only_tools: bool = False,
 ):
     import uvicorn
+
+    settings = ServerSettings.load()
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        addr = None
+
+    is_public_bind = host in {"0.0.0.0", "::"} or (addr is not None and not addr.is_loopback)
+    if is_public_bind and not settings.auth_token:
+        print(
+            "WARNING: server is bound to a non-localhost address without "
+            "PIPAL_AUTH_TOKEN. Set PIPAL_AUTH_TOKEN before public exposure."
+        )
 
     app = create_app(
         agent_scope=agent,
