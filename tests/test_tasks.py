@@ -49,6 +49,9 @@ def test_schedule_seconds_hours():
 def test_schedule_seconds_combined():
     assert schedule_seconds("every 1h30m") == 5400
 
+def test_schedule_seconds_combined_with_spaces():
+    assert schedule_seconds("every 1h 30m") == 5400
+
 
 def test_schedule_seconds_days():
     assert schedule_seconds("every 1d") == 86400
@@ -158,6 +161,11 @@ def test_parse_task_response_fail():
 def test_parse_task_response_unexpected():
     status, msg = parse_task_response("some random output")
     assert status == "TASK_FAIL"
+
+def test_parse_task_response_rejects_prefix_collisions():
+    status, msg = parse_task_response('TASK_OKAY changes="done"')
+    assert status == "TASK_FAIL"
+    assert "Unexpected output" in msg
 
 
 def test_parse_task_message_ok():
