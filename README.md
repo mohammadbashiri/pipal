@@ -11,8 +11,31 @@
 
 ## What is pipal?
 
-Simply put, pipal is a wrapper around [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) that helps agents adapt to you and grow with you, by giving pi agents persistence, memory, and personality.
+`pipal` is a thin persistence/session layer on top of [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
 
+It adds:
+- persistent agent scaffolds (identity/policy/memory files)
+- organized session storage
+- rolling summaries
+- optional task/daemon/server utilities
+
+## What pipal is not
+
+`pipal` is not a replacement runtime for `pi`.
+
+It does not replace:
+- model/provider integrations
+- core tool execution behavior
+- `pi` prompt/runtime semantics
+
+Those are inherited from `pi`. If `pi` behavior changes, `pipal` follows that behavior.
+
+## Runtime contract with pi
+
+`pipal` shells out to `pi` and passes through provider/model/session/tool flags.
+For normal usage, the operational rule is:
+
+> If `pi` works in your environment, `pipal` should work too.
 
 ## Installation
 
@@ -41,7 +64,7 @@ uv tool install -e .
 
 ## Quick Start
 
-If you are installing pi-coding-agent for the first time, you would need to first connect to a model provider using the `/login` command in a pi session - simply follow the instructions in the [pi-coding-agent's Quick Start](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
+If this is your first `pi` setup, connect `pi` to a provider first using `/login` in a `pi` session (see [pi Quick Start](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start)).
 
 Once pi is connected to a provider, create and chat:
 
@@ -67,6 +90,8 @@ pipal daemon start --agent momo --every 30m  # run due tasks on schedule
 See [docs/tasks.md](docs/tasks.md) for full documentation: task format, scheduling syntax, model overrides, and daemon usage.
 
 ## Server
+
+The server is optional. Core `pipal` usage is CLI-first (`agent`, `session`, `task`, `daemon`).
 
 Run the HTTP/WS backend:
 ```bash
