@@ -27,6 +27,9 @@ docker run -it --rm \
 ```
 
 ## Run the server
+
+`pipal serve` defaults to `127.0.0.1`. In Docker, use `--host 0.0.0.0` so the published container port is reachable from the host.
+
 ```bash
 docker run -it --rm -p 8000:8000 \
   -v ~/.pipal-docker:/home/pipal/.pipal \
