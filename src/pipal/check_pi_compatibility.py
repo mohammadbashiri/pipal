@@ -30,6 +30,7 @@ REQUIRED_FLAGS = [
     "--resume",
     "--tools",
 ]
+MIN_PI_VERSION = "0.66.1"
 
 REMEDIATION = {
     "pi binary": [
@@ -37,6 +38,10 @@ REMEDIATION = {
     ],
     "pi --version": [
         "Run `pi --version` directly and fix your pi installation/provider setup.",
+    ],
+    "pi version supported": [
+        f"Upgrade pi-coding-agent to at least {MIN_PI_VERSION}.",
+        "Then rerun: `pipal check-pi-compatibility`",
     ],
     "pi --help": [
         "Run `pi --help` directly. If it fails, reinstall/update pi-coding-agent.",
@@ -94,6 +99,21 @@ def _check_rpc_mode(help_text: str) -> bool:
     if "rpc" in help_text.lower():
         return True
     return False
+
+
+def _extract_semver(value: str) -> tuple[int, int, int] | None:
+    match = re.search(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)", value or "")
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def _is_version_at_least(current: str, minimum: str) -> bool:
+    cur = _extract_semver(current)
+    min_v = _extract_semver(minimum)
+    if cur is None or min_v is None:
+        return False
+    return cur >= min_v
 
 
 async def _run_rpc_check(agent_path: str, llm: dict) -> tuple[bool, str]:
@@ -221,6 +241,18 @@ def run_doctor(agent_name: str | None = None) -> int:
     results.append(result)
     log_result(result)
     print_remediation(result)
+    if result.ok:
+        version_supported = _is_version_at_least(result.details, MIN_PI_VERSION)
+        version_result = CheckResult(
+            "pi version supported",
+            version_supported,
+            f"Detected {result.details}; minimum supported is {MIN_PI_VERSION}",
+        )
+        results.append(version_result)
+        log_result(version_result)
+        print_remediation(version_result)
+        if not version_supported:
+            return 2
 
     log_start("pi --help")
     help_proc = _run([pi_bin, "--help"])
@@ -297,4 +329,3 @@ def run_doctor(agent_name: str | None = None) -> int:
         return 2
     console.print("\n[green]Compatibility check passed.[/green]")
     return 0
-
