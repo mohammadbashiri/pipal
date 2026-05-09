@@ -55,7 +55,7 @@ def _find_native_pi() -> str:
 
     raise FileNotFoundError(
         "Could not find the native pi binary. Is pi installed? "
-        "(npm install -g @mariozechner/pi-coding-agent)"
+        "(npm install -g @earendil-works/pi-coding-agent)"
     )
 
 

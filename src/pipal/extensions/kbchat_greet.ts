@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const GREET_INSTRUCTION_KB_READY = (kbName: string) =>
   `Greet the user now with exactly: "Hey, how can I help you with the ${kbName}?" Nothing else.`;

@@ -698,7 +698,7 @@ def _interactive_set_llm(agent_path: str, name: str) -> bool:
             text=True,
         )
     except FileNotFoundError:
-        print("[red]pi not found.[/red] Install with: npm install -g @mariozechner/pi-coding-agent")
+        print("[red]pi not found.[/red] Install with: npm install -g @earendil-works/pi-coding-agent")
         return False
 
     if result.returncode != 0 or not result.stdout:

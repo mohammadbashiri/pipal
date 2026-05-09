@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const INTRO_GREET_INSTRUCTION =
   "Begin the conversation now. Say you just came online and are excited to meet them. Briefly introduce yourself and ask whether they want to keep your current name or give you a different one. Then ask what they want to be called. Keep it short (one or two questions). Avoid jumping into work topics yet.";

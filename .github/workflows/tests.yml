@@ -27,7 +27,7 @@ jobs:
       - uses: astral-sh/setup-uv@v3
 
       - name: Install pi
-        run: npm install -g @mariozechner/pi-coding-agent@${{ matrix.pi_version }}
+        run: npm install -g @earendil-works/pi-coding-agent@${{ matrix.pi_version }}
 
       - name: Install pipal
         run: uv pip install -e . --system
