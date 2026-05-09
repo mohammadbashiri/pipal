@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 
 type ContentBlock = {
   type?: string;
@@ -200,6 +199,8 @@ const loadLastEntryType = (sessionPath?: string | null): string | undefined => {
 };
 
 export default function (pi: ExtensionAPI) {
+  let summarizedThisSession = false;
+
   const writeSummary = async (ctx: ExtensionContext) => {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const summaryPath = resolveSummaryPath(sessionFile);
@@ -228,19 +229,17 @@ export default function (pi: ExtensionAPI) {
     logSummaryEvent(summaryPath, `Summarize start via CLI agent=${agentName} session=${sessionName}`);
 
     const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinnerIndex = 0;
+    let spinnerLabel = "Compacting...";
     let spinner: ReturnType<typeof setInterval> | undefined;
-    if (ctx.hasUI) {
-      let i = 0;
-      const render = () =>
-        ctx.ui.setWidget("rolling-summary", (tui, theme) => {
-          const text = theme.fg("warning", `${spinnerFrames[i]} Updating rolling summary...`);
-          return new Text(text, 0, 0);
-        });
 
-      render();
+    const clearLine = () => process.stdout.write("\r\x1b[K");
+
+    if (ctx.hasUI) {
+      process.stdout.write(`${spinnerFrames[0]} ${spinnerLabel}`);
       spinner = setInterval(() => {
-        i = (i + 1) % spinnerFrames.length;
-        render();
+        spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
+        process.stdout.write(`\r${spinnerFrames[spinnerIndex]} ${spinnerLabel}`);
       }, 120);
     }
 
@@ -257,6 +256,10 @@ export default function (pi: ExtensionAPI) {
         logSummaryEvent(summaryPath, "Compaction complete (session shutdown)");
       }
 
+      if (ctx.hasUI) {
+        spinnerLabel = "Updating summary...";
+      }
+
       const result = await pi.exec("pipal", [
         "session",
         "summarize",
@@ -269,24 +272,109 @@ export default function (pi: ExtensionAPI) {
       if (result.code !== 0) {
         const err = result.stderr?.trim() || result.stdout?.trim() || "Unknown error";
         logSummaryEvent(summaryPath, `Summarize failed error=${err}`);
-        if (ctx.hasUI) ctx.ui.notify("Rolling summary: failed (see summary.log)", "error");
+        if (ctx.hasUI) {
+          clearInterval(spinner);
+          clearLine();
+          process.stdout.write("✗ Rolling summary failed\r\n");
+        }
         return;
       }
 
       const out = result.stdout?.trim() || "";
       logSummaryEvent(summaryPath, `Summarize complete ${out}`);
-      if (ctx.hasUI) ctx.ui.notify(`Rolling summary updated: ${summaryPath}`, "info");
+      if (ctx.hasUI) {
+        clearInterval(spinner);
+        clearLine();
+        process.stdout.write("✓ Rolling summary updated\r\n");
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logSummaryEvent(summaryPath, `Summarize failed error=${message}`);
-      if (ctx.hasUI) ctx.ui.notify("Rolling summary: failed (see summary.log)", "error");
+      if (ctx.hasUI) {
+        clearInterval(spinner);
+        clearLine();
+        process.stdout.write("✗ Rolling summary failed\r\n");
+      }
     } finally {
       if (spinner) clearInterval(spinner);
-      if (ctx.hasUI) ctx.ui.setWidget("rolling-summary", undefined);
     }
   };
 
+  const rawConfirm = (question: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      process.stdout.write(`\r\n${question} [y/N]: `);
+
+      let finished = false;
+      const wasRaw = (process.stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw ?? false;
+
+      const cleanup = () => {
+        process.stdin.removeListener("data", onData);
+        try {
+          if (!wasRaw) (process.stdin as NodeJS.ReadStream).setRawMode(false);
+          process.stdin.pause();
+        } catch {
+          // ignore
+        }
+      };
+
+      const finish = (answer: boolean) => {
+        if (finished) return;
+        finished = true;
+        process.stdout.write(`${answer ? "y" : "N"}\r\n`);
+        clearTimeout(timer);
+        cleanup();
+        resolve(answer);
+      };
+
+      const onData = (chunk: Buffer | string) => {
+        const first = chunk.toString("utf8")[0] ?? "";
+        finish(first === "y" || first === "Y");
+      };
+
+      const timer = setTimeout(() => finish(false), 15000);
+
+      try {
+        (process.stdin as NodeJS.ReadStream).setRawMode(true);
+        process.stdin.resume();
+        process.stdin.on("data", onData);
+      } catch {
+        clearTimeout(timer);
+        resolve(false);
+      }
+    });
+  };
+
+  const handleSummaryOnExit = async (ctx: ExtensionContext) => {
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const summaryPath = resolveSummaryPath(sessionFile);
+
+    const hasMessages = ctx
+      .sessionManager
+      .getEntries()
+      .some((entry: SessionEntry) =>
+        entry.type === "message" &&
+        (entry.message?.role === "user" || entry.message?.role === "assistant")
+      );
+
+    if (!ctx.hasUI || !hasMessages) {
+      await writeSummary(ctx);
+      return;
+    }
+
+    const confirmed = await rawConfirm("Update rolling summary?");
+
+    if (!confirmed) {
+      if (summaryPath) {
+        logSummaryEvent(summaryPath, "Summarize skipped (user declined)");
+      }
+      return;
+    }
+
+    await writeSummary(ctx);
+  };
+
   pi.on("session_start", async (_event, ctx) => {
+    summarizedThisSession = false;
     const sessionFile = ctx.sessionManager.getSessionFile();
     const summaryPath = resolveSummaryPath(sessionFile);
     if (!summaryPath) return;
@@ -310,39 +398,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    if (!ctx.hasUI) {
-      await writeSummary(ctx);
-      return;
-    }
-
-    const sessionFile = ctx.sessionManager.getSessionFile();
-    const summaryPath = resolveSummaryPath(sessionFile);
-    const hasMessages = ctx
-      .sessionManager
-      .getEntries()
-      .some((entry: SessionEntry) =>
-        entry.type === "message" &&
-        (entry.message?.role === "user" || entry.message?.role === "assistant")
-      );
-
-    if (!hasMessages) {
-      await writeSummary(ctx);
-      return;
-    }
-
-    const confirmed = await ctx.ui.confirm(
-      "Update rolling summary?",
-      "This will compact the session and update summary.md for this session."
-    );
-
-    if (!confirmed) {
-      if (summaryPath) {
-        logSummaryEvent(summaryPath, "Summarize skipped (user declined)");
-      }
-      ctx.ui.notify("Rolling summary: skipped", "info");
-      return;
-    }
-
-    await writeSummary(ctx);
+    if (summarizedThisSession) return;
+    await handleSummaryOnExit(ctx);
   });
+
 }
