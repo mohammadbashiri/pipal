@@ -146,6 +146,7 @@ def schedule_seconds(schedule: str | None) -> int | None:
     s = schedule.strip().lower()
     if s.startswith("every "):
         s = s[len("every "):].strip()
+    s = re.sub(r"\s+", "", s)
 
     aliases = {
         "minute": "1m",
@@ -203,9 +204,9 @@ def _parse_kv_pairs(payload: str) -> dict:
 
 def parse_task_response(output: str) -> tuple[str, str]:
     out = (output or "").strip()
-    if out.startswith("TASK_OK"):
+    if re.match(r"^TASK_OK\b", out):
         return "TASK_OK", out[len("TASK_OK"):].strip()
-    if out.startswith("TASK_FAIL"):
+    if re.match(r"^TASK_FAIL\b", out):
         return "TASK_FAIL", out[len("TASK_FAIL"):].strip()
     return "TASK_FAIL", f"Unexpected output: {out[:200]}" if out else "No output"
 

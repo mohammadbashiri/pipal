@@ -2,6 +2,15 @@
 
 pipal is a persistence layer on top of [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). It gives pi agents identity, memory, and continuity across sessions.
 
+Deployment model:
+- local-first
+- single-user
+- optional local API server
+
+Non-goals (current):
+- multi-tenant orchestration platform
+- enterprise IAM/compliance system
+
 ## Overview
 
 ```
@@ -122,6 +131,10 @@ pipal includes an HTTP/WebSocket server (`pipal serve`) built with FastAPI:
 - **Scoping** — restrict to a single agent/session
 - **Auth** — optional bearer token via `PIPAL_AUTH_TOKEN` env var
 - **Read-only mode** — history-only, no prompts
+
+Security note:
+- `pipal serve` defaults to localhost bind for safer local usage.
+- If you bind publicly (`0.0.0.0`/non-loopback), use `PIPAL_AUTH_TOKEN` and network protections.
 
 ## LLM configuration
 

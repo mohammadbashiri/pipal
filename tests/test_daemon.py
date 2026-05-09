@@ -23,6 +23,9 @@ def test_parse_interval_seconds():
 def test_parse_interval_full():
     assert parse_interval("1h30m15s") == 5415
 
+def test_parse_interval_with_spaces():
+    assert parse_interval("1h 30m 15s") == 5415
+
 
 def test_parse_interval_invalid():
     with pytest.raises(ValueError):

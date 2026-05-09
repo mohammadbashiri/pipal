@@ -87,6 +87,7 @@ def test_parser_serve():
     p = build_parser()
     args = p.parse_args(["serve", "--port", "9000", "--read-only"])
     assert args.cmd == "serve"
+    assert args.host == "127.0.0.1"
     assert args.port == 9000
     assert args.read_only is True
 
