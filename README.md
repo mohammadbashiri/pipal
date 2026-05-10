@@ -9,49 +9,31 @@
   <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="python">
 </p>
 
+## Why pipal?
+
+I tried OpenClaw and loved the persistence and personality parts. But there was more running under the hood than I was comfortable with, and too much to fully understand. `pi` was the opposite — one agent, a set of tools, nothing more. I fell for the simplicity, missed the persistence, so I built pipal.
+
+Ironically I understand OpenClaw better now. But I'm good here :)
+
 ## What is pipal?
 
-`pipal` is a thin persistence/session layer on top of [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
+A thin persistence layer on top of [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). It adds:
+- each agent gets its own identity, memory, and policy files
+- sessions stored per agent, not per directory
+- rolling summaries — a session can span many chats, and you decide which ones are worth remembering for the next
+- optional tasks, a daemon, and a local HTTP/WS server
 
-It adds:
-- persistent agent scaffolds (identity/policy/memory files)
-- organized session storage
-- rolling summaries
-- optional task/daemon/server utilities
+Built for local, single-user use. One person, one machine. Not a multi-tenant platform, not hardened for the public internet.
+
+Largely prompted into existence and iterated through daily use.
 
 ## What pipal is not
 
-`pipal` is not a replacement runtime for `pi`.
+`pipal` is not a replacement for `pi`. Everything that matters — models, providers, tools, runtime behavior — is `pi`'s job. pipal wraps around it.
 
-It does not replace:
-- model/provider integrations
-- core tool execution behavior
-- `pi` prompt/runtime semantics
+If `pi` breaks, pipal breaks. If `pi` changes behavior, pipal follows. That's the deal.
 
-Those are inherited from `pi`. If `pi` behavior changes, `pipal` follows that behavior.
-
-## Runtime contract with pi
-
-`pipal` shells out to `pi` and passes through provider/model/session/tool flags.
-For normal usage, the operational rule is:
-
-> If `pi` works in your environment, `pipal` should work too.
-
-## Intended deployment model
-
-`pipal` is designed for local-first, single-user usage:
-- one human user
-- local workstation/laptop/dev box
-- local files as durable memory/session state
-
-The optional server is primarily a local API surface for that same single-user workflow.
-
-## Not for
-
-`pipal` is not currently intended to be:
-- a multi-tenant agent platform
-- an enterprise identity/compliance product
-- a hardened internet-facing control plane
+If `pi` works in your environment, `pipal` should work too.
 
 ## Installation
 
