@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,57 +82,25 @@ def _build_conversation_text(entries: Iterable[dict[str, Any]]) -> str:
     return "\n\n".join(sections)
 
 
-def _build_summary_prompt(previous_summary: str, compaction_summaries: list[str]) -> str:
-    summaries_text = "\n\n".join(s for s in compaction_summaries if s.strip())
+def _parse_session_timestamp(filename: str) -> str:
+    match = re.match(r"(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})", filename)
+    if not match:
+        return filename.replace(".jsonl", "")
+    year, month, day, hour, minute, _ = match.groups()
+    return f"{year}-{month}-{day} {hour}:{minute}"
+
+
+def _build_entry_prompt(compaction_summary: str) -> str:
     return "\n".join(
         [
-            "You are maintaining a rolling summary of a long-term assistant session.",
-            "Update the summary using the existing summary and the latest compaction summaries.",
-            "Keep it concise, structured, and durable for future sessions.",
-            "Use the exact format below.",
-            "Do not invent details. If something is unchanged, keep it short.",
+            "Summarize this assistant session in a short paragraph.",
+            "Focus on what the user and assistant worked on, decisions made, and anything left open.",
+            "Be concise and factual. Do not use headers or bullet points.",
+            "If the session contains no meaningful exchange worth recording, respond with exactly: SKIP",
             "",
-            "## Goal",
-            "[What the user is trying to accomplish]",
-            "",
-            "## Constraints & Preferences",
-            "- [Requirements mentioned by user]",
-            "",
-            "## Progress",
-            "### Done",
-            "- [x] [Completed tasks]",
-            "",
-            "### In Progress",
-            "- [ ] [Current work]",
-            "",
-            "### Blocked",
-            "- [Issues, if any]",
-            "",
-            "## Key Decisions",
-            "- **[Decision]**: [Rationale]",
-            "",
-            "## Next Steps",
-            "1. [What should happen next]",
-            "",
-            "## Critical Context",
-            "- [Data needed to continue]",
-            "",
-            "<read-files>",
-            "path/to/file1.ts",
-            "path/to/file2.ts",
-            "</read-files>",
-            "",
-            "<modified-files>",
-            "path/to/changed.ts",
-            "</modified-files>",
-            "",
-            "<existing_summary>",
-            previous_summary or "(none)",
-            "</existing_summary>",
-            "",
-            "<session_compactions>",
-            summaries_text or "(none)",
-            "</session_compactions>",
+            "<session_compaction>",
+            compaction_summary,
+            "</session_compaction>",
         ]
     )
 
@@ -252,9 +221,6 @@ def summarize_session(agent_path: Path, session_name: str | None, llm_config: di
 
     summary_path = session_dir / SUMMARY_FILE_NAME
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    if not summary_path.exists():
-        summary_path.write_text("", encoding="utf-8")
-        _log_summary_event(summary_path, "Summary file created")
 
     state_path = session_dir / SUMMARY_STATE_NAME
     summarized = _load_summary_state(state_path)
@@ -273,7 +239,6 @@ def summarize_session(agent_path: Path, session_name: str | None, llm_config: di
         _log_summary_event(summary_path, "Summarize skipped (no new compacted sessions)")
         return SummaryResult("SKIP", "No new compacted sessions", summary_path)
 
-    previous_summary = summary_path.read_text(encoding="utf-8")
     provider, model = _resolve_summary_model(llm_config)
     if not provider or not model:
         _log_summary_event(summary_path, "Summarize skipped (missing provider/model)")
@@ -281,24 +246,36 @@ def summarize_session(agent_path: Path, session_name: str | None, llm_config: di
 
     _log_summary_event(
         summary_path,
-        f"Summarize start model={provider}/{model} previousChars={len(previous_summary)} sessions={len(pending)}",
+        f"Summarize start model={provider}/{model} sessions={len(pending)}",
     )
 
-    prompt = _build_summary_prompt(previous_summary, [summary for _, summary in pending])
-    try:
-        summary = _run_pi_summary(prompt, provider, model)
-    except Exception as exc:
-        _log_summary_event(summary_path, f"Summarize failed error={exc}")
-        return SummaryResult("FAIL", f"{exc}", summary_path)
+    appended = 0
+    for name, compaction_summary in pending:
+        prompt = _build_entry_prompt(compaction_summary)
+        try:
+            entry_text = _run_pi_summary(prompt, provider, model)
+        except Exception as exc:
+            _log_summary_event(summary_path, f"Summarize failed for {name} error={exc}")
+            continue
 
-    if not summary:
-        _log_summary_event(summary_path, "Summarize skipped (empty response)")
-        return SummaryResult("SKIP", "Empty summary", summary_path)
+        if not entry_text or entry_text.strip().upper() == "SKIP":
+            _log_summary_event(summary_path, f"Summarize skipped for {name} (no meaningful content)")
+            summarized.add(name)
+            continue
 
-    summary_path.write_text(summary.strip() + "\n", encoding="utf-8")
-    for name, _ in pending:
+        ts = _parse_session_timestamp(name)
+        entry = f"\n## {ts} | {name}\n{entry_text.strip()}\n"
+        with summary_path.open("a", encoding="utf-8") as handle:
+            handle.write(entry)
+
         summarized.add(name)
-    _write_summary_state(state_path, summarized)
-    _log_summary_event(summary_path, f"Summarize complete chars={len(summary)} sessions={len(pending)}")
+        appended += 1
+        _log_summary_event(summary_path, f"Entry appended for {name} chars={len(entry_text)}")
 
-    return SummaryResult("OK", f"summary updated: {summary_path}", summary_path)
+    _write_summary_state(state_path, summarized)
+
+    if appended == 0:
+        return SummaryResult("SKIP", "No entries written", summary_path)
+
+    _log_summary_event(summary_path, f"Summarize complete entries={appended}")
+    return SummaryResult("OK", f"summary updated: {summary_path} entries={appended}", summary_path)

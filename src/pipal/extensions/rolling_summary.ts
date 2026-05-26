@@ -275,17 +275,18 @@ export default function (pi: ExtensionAPI) {
         if (ctx.hasUI) {
           clearInterval(spinner);
           clearLine();
-          process.stdout.write("✗ Rolling summary failed\r\n");
+          process.stdout.write("✗ Session summary failed\r\n");
         }
         return;
       }
 
       const out = result.stdout?.trim() || "";
+      const skipped = out.startsWith("SKIP");
       logSummaryEvent(summaryPath, `Summarize complete ${out}`);
       if (ctx.hasUI) {
         clearInterval(spinner);
         clearLine();
-        process.stdout.write("✓ Rolling summary updated\r\n");
+        process.stdout.write(skipped ? "- Nothing new to summarize\r\n" : "✓ Session summary updated\r\n");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -293,7 +294,7 @@ export default function (pi: ExtensionAPI) {
       if (ctx.hasUI) {
         clearInterval(spinner);
         clearLine();
-        process.stdout.write("✗ Rolling summary failed\r\n");
+        process.stdout.write("✗ Session summary failed\r\n");
       }
     } finally {
       if (spinner) clearInterval(spinner);
@@ -361,7 +362,8 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const confirmed = await rawConfirm("Update rolling summary?");
+    const summaryLocation = summaryPath ? ` (${summaryPath})` : "";
+    const confirmed = await rawConfirm(`Keep a summary of this chat in the session summary${summaryLocation}?`);
 
     if (!confirmed) {
       if (summaryPath) {
