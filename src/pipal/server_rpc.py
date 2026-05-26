@@ -43,6 +43,7 @@ class PiRpcClient:
             system_prompt = f"{system_prompt}\n\n---\n\n{summary_block}" if system_prompt else summary_block
 
         session_file = self.session_file or new_session_file(self.agent_dir, self.session_name)
+        self.actual_session_file = session_file
         cmd = [self.settings.pi_bin, "--mode", "rpc", "--session", str(session_file)]
 
         provider = self.llm_config.get("provider")

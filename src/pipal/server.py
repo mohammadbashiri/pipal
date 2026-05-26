@@ -282,7 +282,10 @@ def create_app(
             async def event_forwarder():
                 assert client
                 async for event in client.events():
-                    await websocket.send_text(json.dumps({"type": event.type, "data": event.data}))
+                    data = event.data
+                    if event.type == "agent_end" and hasattr(client, "actual_session_file"):
+                        data = {**data, "session_file": client.actual_session_file.name}
+                    await websocket.send_text(json.dumps({"type": event.type, "data": data}))
 
             forwarder = asyncio.create_task(event_forwarder())
 
