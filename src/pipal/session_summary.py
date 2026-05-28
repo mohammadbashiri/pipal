@@ -258,19 +258,19 @@ def summarize_session(agent_path: Path, session_name: str | None, llm_config: di
             _log_summary_event(summary_path, f"Summarize failed for {name} error={exc}")
             continue
 
-        if not entry_text or entry_text.strip().upper() == "SKIP":
-            _log_summary_event(summary_path, f"Summarize skipped for {name} (no meaningful content)")
-            summarized.add(name)
-            continue
+        body = (entry_text or "").strip()
+        if not body or body.upper() == "SKIP":
+            body = "Brief session — no substantive content recorded."
+            _log_summary_event(summary_path, f"Placeholder entry written for {name} (no substantive content)")
 
         ts = _parse_session_timestamp(name)
-        entry = f"\n## {ts} | {name}\n{entry_text.strip()}\n"
+        entry = f"\n## {ts} | {name}\n{body}\n"
         with summary_path.open("a", encoding="utf-8") as handle:
             handle.write(entry)
 
         summarized.add(name)
         appended += 1
-        _log_summary_event(summary_path, f"Entry appended for {name} chars={len(entry_text)}")
+        _log_summary_event(summary_path, f"Entry appended for {name} chars={len(body)}")
 
     _write_summary_state(state_path, summarized)
 
