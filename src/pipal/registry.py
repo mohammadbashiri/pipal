@@ -166,7 +166,7 @@ def rm_agent(name):
     path = _entry_to_path(entry)
     del reg["agents"][name]
     save_registry(reg)
-    return path
+    return _resolve_path(path) if path else None
 
 def list_agents():
     reg = load_registry()
