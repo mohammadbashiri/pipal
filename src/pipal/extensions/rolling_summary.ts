@@ -362,8 +362,8 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const summaryLocation = summaryPath ? ` (${summaryPath})` : "";
-    const confirmed = await rawConfirm(`Keep a summary of this chat in the session summary${summaryLocation}?`);
+    const summaryLocation = summaryPath ? ` and append to ${summaryPath}` : "";
+    const confirmed = await rawConfirm(`Have the agent summarize this chat${summaryLocation}?`);
 
     if (!confirmed) {
       if (summaryPath) {
