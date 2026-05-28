@@ -6,8 +6,9 @@ import os
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from .runner import build_pipal_context
 from .server_config import ServerSettings
-from .server_context import load_persona, load_summary, new_session_file, read_agent_type
+from .server_context import load_persona, new_session_file, read_agent_type
 from .server_models import RpcEvent
 
 
@@ -33,14 +34,13 @@ class PiRpcClient:
         self.lock = asyncio.Lock()
 
     def _build_cmd(self) -> list[str]:
-        system_prompt = load_persona(self.agent_dir)
-        summary = load_summary(self.agent_dir, self.session_name)
-        if summary:
-            summary_block = (
-                "Rolling summary (supplemental; core files are authoritative if conflicts):\n"
-                f"{summary}"
-            )
-            system_prompt = f"{system_prompt}\n\n---\n\n{summary_block}" if system_prompt else summary_block
+        persona = load_persona(self.agent_dir)
+        agent_type = read_agent_type(self.agent_dir)
+        if agent_type != "kbchat":
+            pipal_context = build_pipal_context(self.agent_dir, self.session_name)
+            system_prompt = f"{pipal_context}\n\n---\n\n{persona}" if persona else pipal_context
+        else:
+            system_prompt = persona
 
         session_file = self.session_file or new_session_file(self.agent_dir, self.session_name)
         self.actual_session_file = session_file
@@ -53,7 +53,6 @@ class PiRpcClient:
         if model:
             cmd += ["--model", model]
 
-        agent_type = read_agent_type(self.agent_dir)
         if agent_type == "kbchat" or self.read_only_tools:
             cmd += ["--tools", "read,grep,find,ls"]
 

@@ -12,16 +12,6 @@ def load_persona(agent_dir: Path) -> str:
     return _load_persona(str(agent_dir))
 
 
-def load_summary(agent_dir: Path, session_name: str = "main") -> str:
-    summary_path = agent_dir / "sessions" / session_name / "summary.md"
-    if summary_path.exists():
-        try:
-            return summary_path.read_text(encoding="utf-8").strip()
-        except OSError:
-            return ""
-    return ""
-
-
 DEFAULT_SESSION_TITLE = "New chat"
 
 

@@ -101,14 +101,24 @@ def load_persona(agent_path: str) -> str:
     return _load_files(files)
 
 
-def _load_summary(agent: Path, session_name: str) -> str:
-    summary_path = agent / "sessions" / session_name / "summary.md"
-    if not summary_path.exists():
-        return ""
-    try:
-        return summary_path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
+PIPAL_CONTEXT_TEMPLATE = """\
+# You are a pipal agent
+
+pipal is a persistence layer on top of pi. Your home is {agent_home}/.
+
+Sessions live under sessions/<name>/ — each session folder has a rolling summary.md plus per-launch .jsonl files.
+
+Current session: {session_name}
+
+For questions about prior context ("what did we do last time", etc.), read sessions/{session_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home."""
+
+
+def build_pipal_context(agent: Path, session_name: str) -> str:
+    """Runtime-injected system context block teaching the agent about pipal."""
+    return PIPAL_CONTEXT_TEMPLATE.format(
+        agent_home=agent.resolve(),
+        session_name=session_name,
+    )
 
 
 def _read_agent_type(agent: Path) -> str | None:
@@ -270,19 +280,12 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     elif routine_only:
         system_prompt = _load_files([agent / fname for fname in ROUTINE_CONTEXT_FILES])
     else:
-        system_prompt = load_persona(agent_path)
-
-    if not no_session:
-        summary = _load_summary(agent, session_name)
-        if summary:
-            summary_block = (
-                "Rolling summary (supplemental; core files are authoritative if conflicts):\n"
-                f"{summary}"
-            )
-            if system_prompt:
-                system_prompt = f"{system_prompt}\n\n---\n\n{summary_block}"
-            else:
-                system_prompt = summary_block
+        persona = load_persona(agent_path)
+        if agent_type != "kbchat" and not no_session:
+            pipal_context = build_pipal_context(agent, session_name)
+            system_prompt = f"{pipal_context}\n\n---\n\n{persona}" if persona else pipal_context
+        else:
+            system_prompt = persona
 
     _run_agent_cmd(
         agent_path=agent_path,
