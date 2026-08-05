@@ -39,11 +39,13 @@ If Pi breaks, pipal breaks. If Pi changes behavior, pipal follows. That's the de
 
 ## Installation
 
-Clone the repo:
+Requires the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/mohammadbashiri/pipal
 cd pipal
+uv tool install .
+pipal check-pi-compatibility
 ```
 
 ## Quick Start
