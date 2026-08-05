@@ -55,4 +55,4 @@ pipal agent create momo
 pipal agent chat momo
 ```
 
-For anything else, use `--help` or ask your agent to inspect the repo.
+To learn more about what else pipal does, use `--help` or just your agent to check out the repo.
