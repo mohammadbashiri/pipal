@@ -135,12 +135,12 @@ pipal includes an HTTP/WebSocket server (`pipal serve`) built with FastAPI:
 - **REST endpoints** — list agents, topics, native pi sessions, and chat history
 - **WebSocket** — real-time chat via pi's RPC mode
 - **Scoping** — restrict to a single agent/topic/session
-- **Auth** — optional bearer token via `PIPAL_AUTH_TOKEN` env var
+- **Auth** — optional on loopback; required for non-local binds via `PIPAL_AUTH_TOKEN`
 - **Read-only mode** — history-only, no prompts
 
 Security note:
 - `pipal serve` defaults to localhost bind for safer local usage.
-- If you bind publicly (`0.0.0.0`/non-loopback), use `PIPAL_AUTH_TOKEN` and network protections.
+- Non-local binds are refused unless `PIPAL_AUTH_TOKEN` is set; also use network protections.
 
 ## LLM configuration
 

@@ -334,13 +334,11 @@ def run_server(
     except ValueError:
         addr = None
 
-    is_public_bind = host in {"0.0.0.0", "::"} or (addr is not None and not addr.is_loopback)
-    if is_public_bind and not settings.auth_token:
-        print(
-            "WARNING: public/non-local bind detected without PIPAL_AUTH_TOKEN.\n"
-            "The server will run unauthenticated.\n"
-            "Before exposing access, set PIPAL_AUTH_TOKEN and place the service "
-            "behind network controls (TLS/reverse proxy, firewall, or VPN)."
+    is_non_local_bind = not (addr.is_loopback if addr is not None else host.lower() == "localhost")
+    if is_non_local_bind and not settings.auth_token:
+        raise SystemExit(
+            "Refusing non-local bind without PIPAL_AUTH_TOKEN. "
+            "Set a long random token and use network controls such as TLS, a firewall, or a VPN."
         )
 
     app = create_app(

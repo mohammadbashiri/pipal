@@ -28,25 +28,17 @@ docker run -it --rm \
 
 ## Run the server
 
-`pipal serve` defaults to `127.0.0.1`. In Docker, use `--host 0.0.0.0` so the published container port is reachable from the host.
+`pipal serve` defaults to `127.0.0.1`. In Docker, bind to `0.0.0.0` inside the container and set an auth token. Pipal refuses non-local binds without one.
 
 ```bash
-docker run -it --rm -p 8000:8000 \
-  -v ~/.pipal-docker:/home/pipal/.pipal \
-  -v ~/.pi-docker:/home/pipal/.pi \
-  pipal:latest serve --host 0.0.0.0 --port 8000
-```
-
-Recommended (set auth token):
-```bash
-docker run -it --rm -p 8000:8000 \
+docker run -it --rm -p 127.0.0.1:8000:8000 \
   -e PIPAL_AUTH_TOKEN="replace-with-long-random-token" \
   -v ~/.pipal-docker:/home/pipal/.pipal \
   -v ~/.pi-docker:/home/pipal/.pi \
   pipal:latest serve --host 0.0.0.0 --port 8000
 ```
 
-If exposing beyond localhost/LAN, put the service behind TLS and access controls (for example VPN, firewall rules, or reverse-proxy auth).
+Keep the published port on localhost unless remote access is intentional. For remote access, use TLS and network controls such as a VPN, firewall, or authenticated reverse proxy.
 
 ## Log in to pi inside the container
 ```bash

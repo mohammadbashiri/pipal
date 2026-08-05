@@ -26,8 +26,8 @@ Security-sensitive assets:
 - provider/model configuration (`llm.json`)
 
 Primary risks:
-- unauthenticated server exposure when bound publicly
-- weak/guessable bearer token if auth is enabled
+- accidental server exposure beyond localhost
+- weak/guessable bearer tokens
 - accidental leakage of local filesystem context through agent/tool usage
 
 Out of scope (for now):
@@ -55,6 +55,6 @@ Pre-exposure verification checklist:
 ## Hardening notes
 
 Current server behavior:
-- auth is enabled when `PIPAL_AUTH_TOKEN` (or `AUTH_TOKEN`) is set
-- unauthenticated mode is still possible by configuration
-- CORS is permissive for developer convenience; treat public exposure accordingly
+- loopback binds may run without authentication
+- non-local binds require `PIPAL_AUTH_TOKEN` (or `AUTH_TOKEN`)
+- CORS is permissive for developer convenience; treat non-local exposure accordingly

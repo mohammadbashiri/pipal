@@ -3,6 +3,8 @@ name = "pipal"
 version = "0.2.0"
 description = "A persistent agent layer on top of pi-coding-agent"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Mo Bashiri", email = "mohammadbashiri93@gmail.com" }
 ]
