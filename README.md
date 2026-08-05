@@ -14,7 +14,7 @@
 
 ## Why pipal?
 
-I tried OpenClaw, loved the persistence and personality parts, but it was too much to fully understand, and I felt uneasy about that. Pi was the opposite — one agent, a set of tools, nothing more. I fell for the simplicity, missed the persistence, so I built pipal.
+I tried OpenClaw, loved the persistence and personality parts, but it was too much to fully understand, and I felt uneasy about that. Pi was the opposite — one agent, a set of tools, nothing more. I fell for the simplicity, missed the persistence, and so..
 
 Ironically I understand OpenClaw better now. But I'm good here :)
 
