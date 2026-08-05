@@ -12,13 +12,13 @@ class AgentInfo:
 
 
 @dataclass
-class SessionInfo:
+class TopicInfo:
     name: str
     path: Path
 
 
 @dataclass
-class SessionFileInfo:
+class SessionInfo:
     name: str
     path: Path
 

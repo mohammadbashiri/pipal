@@ -15,24 +15,25 @@ from .llm_config import load_llm_config
 from .registry import list_agents as registry_list_agents, get_agent
 from .server_config import ServerSettings
 from .server_context import (
-    ensure_session_meta,
-    update_session_meta,
-    update_session_title_from_prompt,
+    ensure_topic_meta,
+    update_topic_meta,
+    update_topic_title_from_prompt,
 )
-from .server_models import AgentInfo, SessionInfo, SessionFileInfo
+from .server_models import AgentInfo, SessionInfo
+from .topic_storage import topics_root, topic_dir, topic_sessions_dir, validate_topic_name
 from .server_rpc import PiRpcClient
 
 
 def create_app(
     *,
     agent_scope: str | None = None,
+    topic_scope: str | None = None,
     session_scope: str | None = None,
-    session_file_scope: str | None = None,
     read_only: bool = False,
     read_only_tools: bool = False,
 ) -> FastAPI:
     settings = ServerSettings.load()
-    app = FastAPI(title="pipal server", version="0.1.0")
+    app = FastAPI(title="pipal server", version="0.2.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -64,27 +65,20 @@ def create_app(
             return None
         return AgentInfo(name=agent["name"], path=Path(agent["path"]))
 
-    def _list_sessions(agent: AgentInfo) -> list[dict]:
-        sessions_dir = agent.path / "sessions"
-        if not sessions_dir.exists():
-            return []
-        sessions: list[dict] = []
-        for path in sessions_dir.iterdir():
-            if path.is_dir():
-                if session_scope and path.name != session_scope:
-                    continue
-                meta = ensure_session_meta(path)
-                sessions.append({"name": path.name, "path": path, **meta})
-        return sorted(sessions, key=lambda s: s.get("updated_at", ""), reverse=True)
+    def _list_topics(agent: AgentInfo) -> list[dict]:
+        topics: list[dict] = []
+        for path in topics_root(agent.path).iterdir():
+            if not path.is_dir() or (topic_scope and path.name != topic_scope):
+                continue
+            meta = ensure_topic_meta(path)
+            topics.append({"name": path.name, "path": path, **meta})
+        return sorted(topics, key=lambda item: item.get("updated_at", ""), reverse=True)
 
-    def _list_session_files(agent: AgentInfo, session_name: str) -> list[SessionFileInfo]:
-        session_dir = agent.path / "sessions" / session_name
-        if not session_dir.exists():
-            return []
-        files = sorted(session_dir.glob("*.jsonl"), reverse=True)
-        if session_file_scope:
-            files = [p for p in files if p.name == session_file_scope]
-        return [SessionFileInfo(name=p.name, path=p) for p in files]
+    def _list_sessions(agent: AgentInfo, topic_name: str) -> list[SessionInfo]:
+        files = sorted(topic_sessions_dir(agent.path, topic_name).glob("*.jsonl"), reverse=True)
+        if session_scope:
+            files = [path for path in files if path.name == session_scope]
+        return [SessionInfo(name=path.name, path=path) for path in files]
 
     def _extract_text(message: dict) -> str:
         content = message.get("content") or []
@@ -119,24 +113,11 @@ def create_app(
             history.append({"role": role, "content": text})
         return history
 
-    def _load_session_history(agent: AgentInfo, session_name: str) -> list[dict]:
-        session_dir = agent.path / "sessions" / session_name
-        if not session_dir.exists():
-            return []
-        files = sorted(p for p in session_dir.glob("*.jsonl"))
+    def _load_topic_history(agent: AgentInfo, topic_name: str) -> list[dict]:
         history: list[dict] = []
-        for file in files:
-            history.extend(_load_history_from_file(file))
+        for session in reversed(_list_sessions(agent, topic_name)):
+            history.extend(_load_history_from_file(session.path))
         return history
-
-    def _load_session_file_history(agent: AgentInfo, session_name: str, filename: str) -> list[dict]:
-        session_dir = agent.path / "sessions" / session_name
-        if not session_dir.exists():
-            return []
-        target = session_dir / filename
-        if not target.exists():
-            return []
-        return _load_history_from_file(target)
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
@@ -160,63 +141,67 @@ def create_app(
     async def get_agents():
         return [{"name": a.name} for a in _list_agents()]
 
-    @app.get("/agents/{agent_name}/sessions")
-    async def get_sessions(agent_name: str):
+    @app.get("/agents/{agent_name}/topics")
+    async def get_topics(agent_name: str):
         agent = _get_agent(agent_name)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        sessions = _list_sessions(agent)
         return [
             {
-                "name": s["name"],
-                "title": s.get("title"),
-                "created_at": s.get("created_at"),
-                "updated_at": s.get("updated_at"),
+                "name": item["name"],
+                "title": item.get("title"),
+                "created_at": item.get("created_at"),
+                "updated_at": item.get("updated_at"),
             }
-            for s in sessions
+            for item in _list_topics(agent)
         ]
 
-    @app.get("/agents/{agent_name}/sessions/{session_name}/history")
-    async def get_session_history(agent_name: str, session_name: str):
+    @app.get("/agents/{agent_name}/topics/{topic_name}/history")
+    async def get_topic_history(agent_name: str, topic_name: str):
         agent = _get_agent(agent_name)
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
+        if not agent or (topic_scope and topic_name != topic_scope):
+            raise HTTPException(status_code=404, detail="Topic not found")
+        try:
+            validate_topic_name(topic_name)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        return {"messages": _load_topic_history(agent, topic_name)}
+
+    @app.get("/agents/{agent_name}/topics/{topic_name}/sessions")
+    async def get_sessions(agent_name: str, topic_name: str):
+        agent = _get_agent(agent_name)
+        if not agent or (topic_scope and topic_name != topic_scope):
+            raise HTTPException(status_code=404, detail="Topic not found")
+        try:
+            return [{"name": item.name} for item in _list_sessions(agent, topic_name)]
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Topic not found")
+
+    @app.get("/agents/{agent_name}/topics/{topic_name}/sessions/{session_name}/history")
+    async def get_session_history(agent_name: str, topic_name: str, session_name: str):
+        agent = _get_agent(agent_name)
+        if not agent or (topic_scope and topic_name != topic_scope):
+            raise HTTPException(status_code=404, detail="Topic not found")
         if session_scope and session_name != session_scope:
             raise HTTPException(status_code=404, detail="Session not found")
-        return {"messages": _load_session_history(agent, session_name)}
-
-    @app.get("/agents/{agent_name}/sessions/{session_name}/files")
-    async def get_session_files(agent_name: str, session_name: str):
-        agent = _get_agent(agent_name)
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        if session_scope and session_name != session_scope:
+        if Path(session_name).name != session_name:
             raise HTTPException(status_code=404, detail="Session not found")
-        return [{"name": f.name} for f in _list_session_files(agent, session_name)]
-
-    @app.get("/agents/{agent_name}/sessions/{session_name}/files/{file_name}/history")
-    async def get_session_file_history(agent_name: str, session_name: str, file_name: str):
-        agent = _get_agent(agent_name)
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        if session_scope and session_name != session_scope:
+        session_path = topic_sessions_dir(agent.path, topic_name) / session_name
+        if not session_path.is_file() or session_path.suffix != ".jsonl":
             raise HTTPException(status_code=404, detail="Session not found")
-        if session_file_scope and file_name != session_file_scope:
-            raise HTTPException(status_code=404, detail="File not found")
-        return {"messages": _load_session_file_history(agent, session_name, file_name)}
+        return {"messages": _load_history_from_file(session_path)}
 
-    @app.post("/agents/{agent_name}/sessions")
-    async def create_session(agent_name: str):
+    @app.post("/agents/{agent_name}/topics")
+    async def create_topic(agent_name: str):
         if read_only:
             raise HTTPException(status_code=403, detail="Read-only mode")
         agent = _get_agent(agent_name)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        session_name = uuid.uuid4().hex[:8]
-        session_dir = agent.path / "sessions" / session_name
-        session_dir.mkdir(parents=True, exist_ok=True)
-        ensure_session_meta(session_dir)
-        return {"name": session_name}
+        topic_name = uuid.uuid4().hex[:8]
+        current_topic_dir = topic_dir(agent.path, topic_name)
+        ensure_topic_meta(current_topic_dir)
+        return {"name": topic_name}
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
@@ -237,16 +222,21 @@ def create_app(
                 await websocket.close(code=4400)
                 return
             agent_name = init.get("agent")
-            session_name = init.get("session") or "main"
-            session_file = init.get("session_file")
+            topic_name = init.get("topic") or topic_scope or "main"
+            session_name = init.get("session") or session_scope
 
             if agent_scope and agent_name != agent_scope:
+                await websocket.close(code=4404)
+                return
+            if topic_scope and topic_name != topic_scope:
                 await websocket.close(code=4404)
                 return
             if session_scope and session_name != session_scope:
                 await websocket.close(code=4404)
                 return
-            if session_file_scope and session_file and session_file != session_file_scope:
+            try:
+                validate_topic_name(topic_name)
+            except ValueError:
                 await websocket.close(code=4404)
                 return
 
@@ -254,15 +244,20 @@ def create_app(
             if not agent:
                 await websocket.close(code=4404)
                 return
+            if read_only:
+                await websocket.close(code=4403)
+                return
 
-            session_dir = agent.path / "sessions" / session_name
-            session_dir.mkdir(parents=True, exist_ok=True)
-            ensure_session_meta(session_dir)
+            current_topic_dir = topic_dir(agent.path, topic_name)
+            ensure_topic_meta(current_topic_dir)
 
             session_path = None
-            if session_file:
-                candidate = agent.path / "sessions" / session_name / session_file
-                if not candidate.exists():
+            if session_name:
+                if Path(session_name).name != session_name:
+                    await websocket.close(code=4404)
+                    return
+                candidate = topic_sessions_dir(agent.path, topic_name) / session_name
+                if not candidate.is_file() or candidate.suffix != ".jsonl":
                     await websocket.close(code=4404)
                     return
                 session_path = candidate
@@ -272,7 +267,7 @@ def create_app(
             client = PiRpcClient(
                 settings=settings,
                 agent_dir=agent.path,
-                session_name=session_name,
+                topic_name=topic_name,
                 session_file=session_path,
                 llm_config=llm_config,
                 read_only_tools=read_only_tools,
@@ -284,7 +279,7 @@ def create_app(
                 async for event in client.events():
                     data = event.data
                     if event.type == "agent_end" and hasattr(client, "actual_session_file"):
-                        data = {**data, "session_file": client.actual_session_file.name}
+                        data = {**data, "session": client.actual_session_file.name}
                     await websocket.send_text(json.dumps({"type": event.type, "data": data}))
 
             forwarder = asyncio.create_task(event_forwarder())
@@ -301,8 +296,8 @@ def create_app(
                     if not prompt and not images:
                         continue
                     if prompt:
-                        update_session_title_from_prompt(session_dir, prompt)
-                    update_session_meta(session_dir)
+                        update_topic_title_from_prompt(current_topic_dir, prompt)
+                    update_topic_meta(current_topic_dir)
                     payload = {"type": "prompt", "message": prompt}
                     if images:
                         payload["images"] = images
@@ -326,8 +321,8 @@ def run_server(
     host: str,
     port: int,
     agent: str | None = None,
+    topic: str | None = None,
     session: str | None = None,
-    session_file: str | None = None,
     read_only: bool = False,
     read_only_tools: bool = False,
 ):
@@ -350,8 +345,8 @@ def run_server(
 
     app = create_app(
         agent_scope=agent,
+        topic_scope=topic,
         session_scope=session,
-        session_file_scope=session_file,
         read_only=read_only,
         read_only_tools=read_only_tools,
     )

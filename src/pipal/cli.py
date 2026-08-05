@@ -1,4 +1,4 @@
-import argparse, shutil, sys, subprocess
+import argparse, json, shutil, sys, subprocess
 from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
@@ -8,7 +8,8 @@ from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
 from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
-from .session_summary import summarize_session
+from .topic_summary import summarize_topic
+from .topic_storage import topics_root, topic_dir, topic_sessions_dir, validate_topic_name
 from .check_pi_compatibility import run_doctor
 from .tasks import (
     list_tasks,
@@ -22,6 +23,35 @@ from .tasks import (
     task_root_global,
     task_root_personal,
 )
+
+
+def _resolve_session_file(agent_path: str, topic_name: str, value: str) -> Path | None:
+    sessions = topic_sessions_dir(agent_path, topic_name)
+    direct = Path(value).expanduser()
+    if direct.is_absolute():
+        try:
+            direct.resolve().relative_to(sessions.resolve())
+        except ValueError:
+            return None
+        return direct.resolve() if direct.is_file() else None
+
+    candidate = sessions / value
+    if candidate.is_file():
+        return candidate
+    matches = [
+        path
+        for path in sessions.glob("*.jsonl")
+        if path.stem.startswith(value) or str(_session_header(path).get("id", "")).startswith(value)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _session_header(path: Path) -> dict:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.loads(handle.readline())
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def build_parser():
@@ -57,21 +87,39 @@ def build_parser():
     p_set.add_argument("--provider", default=None)
     p_set.add_argument("--model", default=None)
 
-    # ── session subcommands ──
-    ps = sub.add_parser("session", help="Manage sessions")
+    # ── topic subcommands ──
+    ptopic = sub.add_parser("topic", help="Manage persistent Pipal topics")
+    topic_sub = ptopic.add_subparsers(dest="topic_cmd")
+
+    topic_list = topic_sub.add_parser("list", help="List topics for an agent")
+    topic_list.add_argument("--agent", required=True, help="Agent name")
+
+    topic_sum = topic_sub.add_parser("summarize", help="Update a topic's rolling summary")
+    topic_sum.add_argument("--agent", required=True, help="Agent name")
+    topic_sum.add_argument("--topic", dest="topic_name", default="main", help="Topic name (default: main)")
+
+    topic_remove = topic_sub.add_parser("remove", help="Remove a topic and its pi sessions")
+    topic_remove.add_argument("--agent", required=True, help="Agent name")
+    topic_remove.add_argument("--topic", dest="topic_name", required=True, help="Topic name to remove")
+    topic_remove.add_argument("--yes", action="store_true", help="Skip confirmation")
+
+    # ── native pi session subcommands ──
+    ps = sub.add_parser("session", help="Manage native pi sessions within a topic")
     ssub = ps.add_subparsers(dest="session_cmd")
 
-    s_list = ssub.add_parser("list", help="List sessions for an agent")
-    s_list.add_argument("--agent", required=True, help="Agent name")
-
-    s_sum = ssub.add_parser("summarize", help="Summarize the latest session into summary.md")
-    s_sum.add_argument("--agent", required=True, help="Agent name")
-    s_sum.add_argument("--session", dest="session_name", default=None, help="Session name (defaults to main)")
-
-    s_remove = ssub.add_parser("remove", help="Remove a session folder")
-    s_remove.add_argument("--agent", required=True, help="Agent name")
-    s_remove.add_argument("--session", dest="session_name", required=True, help="Session name to remove")
-    s_remove.add_argument("--yes", action="store_true", help="Skip confirmation")
+    for command, help_text in (
+        ("list", "List pi sessions in a topic"),
+        ("info", "Show information about a pi session"),
+        ("open", "Open a pi session"),
+        ("remove", "Remove a pi session"),
+    ):
+        parser = ssub.add_parser(command, help=help_text)
+        if command != "list":
+            parser.add_argument("session", help="Session filename, path, or unique ID prefix")
+        parser.add_argument("--agent", required=True, help="Agent name")
+        parser.add_argument("--topic", default="main", help="Topic name (default: main)")
+        if command == "remove":
+            parser.add_argument("--yes", action="store_true", help="Skip confirmation")
 
     # ── task subcommands ──
     pt = sub.add_parser("task", help="Manage tasks")
@@ -117,10 +165,10 @@ def build_parser():
     psrv.add_argument("--host", default="127.0.0.1")
     psrv.add_argument("--port", type=int, default=8000)
     psrv.add_argument("--agent", dest="serve_agent", default=None, help="Scope to one agent")
-    psrv.add_argument("--session", dest="serve_session", default=None, help="Scope to one session")
-    psrv.add_argument("--session-file", dest="serve_session_file", default=None, help="Scope to one session file")
-    psrv.add_argument("--read-only", action="store_true", help="History-only (no prompts, no new sessions)")
-    psrv.add_argument("--read-only-tools", action="store_true", help="Allow chat + sessions, restrict tools to read/grep/find/ls")
+    psrv.add_argument("--topic", dest="serve_topic", default=None, help="Scope to one topic")
+    psrv.add_argument("--session", dest="serve_session", default=None, help="Scope to one native pi session")
+    psrv.add_argument("--read-only", action="store_true", help="History-only (no prompts or topic/session creation)")
+    psrv.add_argument("--read-only-tools", action="store_true", help="Allow chat, restrict tools to read/grep/find/ls")
 
     p_doctor = sub.add_parser("check-pi-compatibility", help="Check local pi compatibility")
     p_doctor.add_argument("--agent", default=None, help="Agent to use for runtime check")
@@ -138,67 +186,101 @@ def main(argv=None):
 
     args = build_parser().parse_args(argv)
 
-    if args.cmd == "session":
-        if args.session_cmd == "list":
-            agent = get_agent(args.agent)
-            if not agent:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                return 2
+    if args.cmd == "topic":
+        agent = get_agent(args.agent)
+        if not agent:
+            print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
+            return 2
 
-            sessions_root = Path(agent["path"]) / "sessions"
-            if not sessions_root.exists():
-                print("[yellow]No sessions found[/yellow]")
+        if args.topic_cmd == "list":
+            entries = sorted(p.name for p in topics_root(agent["path"]).iterdir() if p.is_dir())
+            if not entries:
+                print("[yellow]No topics found[/yellow]")
                 return 0
-
-            session_names = sorted(p.name for p in sessions_root.iterdir() if p.is_dir())
-            if not session_names:
-                print("[yellow]No sessions found[/yellow]")
-                return 0
-
-            for name in session_names:
+            for name in entries:
                 print(f"- {name}")
             return 0
 
-        if args.session_cmd == "summarize":
-            agent = get_agent(args.agent)
-            if not agent:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                return 2
+        try:
+            topic_name = validate_topic_name(args.topic_name)
+        except ValueError as exc:
+            print(f"[red]{exc}[/red]")
+            return 2
 
+        if args.topic_cmd == "summarize":
             llm = load_llm_config(agent["path"])
             if not llm:
                 print("[yellow]No llm.json found. Run:[/yellow]")
                 print(f'  pipal agent set-llm {args.agent} "provider:model"')
                 return 2
+            result = summarize_topic(Path(agent["path"]), topic_name, llm)
+            color = "green" if result.status == "OK" else "yellow"
+            print(f"[{color}]{result.status}[/{color}] {result.message}")
+            return 0 if result.status in {"OK", "SKIP"} else 2
 
-            result = summarize_session(Path(agent["path"]), args.session_name, llm)
-            if result.status == "OK":
-                print(f"[green]OK[/green] {result.message}")
+        if args.topic_cmd == "remove":
+            path = topics_root(agent["path"]) / topic_name
+            if not path.exists():
+                print(f"[yellow]Topic not found[/yellow] {topic_name}")
                 return 0
-            if result.status == "SKIP":
-                print(f"[yellow]SKIP[/yellow] {result.message}")
+            if not args.yes and not Confirm.ask(f"Delete topic {topic_name} and all its sessions?", default=False):
+                print("[yellow]Cancelled[/yellow]")
                 return 0
-            print(f"[red]FAIL[/red] {result.message}")
+            shutil.rmtree(path)
+            print(f"[green]Removed[/green] topic {topic_name}")
+            return 0
+
+    if args.cmd == "session":
+        agent = get_agent(args.agent)
+        if not agent:
+            print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
+            return 2
+        try:
+            sessions = topic_sessions_dir(agent["path"], args.topic)
+        except ValueError as exc:
+            print(f"[red]{exc}[/red]")
             return 2
 
-        if args.session_cmd == "remove":
-            agent = get_agent(args.agent)
-            if not agent:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                return 2
-
-            session_dir = Path(agent["path"]) / "sessions" / args.session_name
-            if not session_dir.exists():
-                print(f"[yellow]Session not found[/yellow] {session_dir}")
+        if args.session_cmd == "list":
+            files = sorted(sessions.glob("*.jsonl"), reverse=True)
+            if not files:
+                print("[yellow]No sessions found[/yellow]")
                 return 0
+            for path in files:
+                header = _session_header(path)
+                session_id = header.get("id", "-")
+                print(f"- {path.name}  id={session_id}")
+            return 0
 
-            if not args.yes:
-                if not Confirm.ask(f"Delete session directory {session_dir}?", default=False):
-                    print("[yellow]Cancelled[/yellow]")
-                    return 0
+        session_file = _resolve_session_file(agent["path"], args.topic, args.session)
+        if not session_file:
+            print(f"[red]Session not found or ambiguous[/red] {args.session}")
+            return 2
 
-            shutil.rmtree(session_dir)
-            print(f"[green]Removed[/green] {session_dir}")
+        if args.session_cmd == "info":
+            header = _session_header(session_file)
+            entries = max(0, len(session_file.read_text(encoding="utf-8").splitlines()) - 1)
+            print(f"File:    {session_file}")
+            print(f"ID:      {header.get('id', '-')}")
+            print(f"Created: {header.get('timestamp', '-')}")
+            print(f"CWD:     {header.get('cwd', '-')}")
+            print(f"Entries: {entries}")
+            return 0
+
+        if args.session_cmd == "open":
+            llm = load_llm_config(agent["path"])
+            if not llm:
+                print("[yellow]No llm.json found[/yellow]")
+                return 2
+            run_agent(agent["path"], llm, ["--topic", args.topic, "--session", str(session_file)])
+            return 0
+
+        if args.session_cmd == "remove":
+            if not args.yes and not Confirm.ask(f"Delete pi session {session_file.name}?", default=False):
+                print("[yellow]Cancelled[/yellow]")
+                return 0
+            session_file.unlink()
+            print(f"[green]Removed[/green] {session_file.name}")
             return 0
 
     if args.cmd == "serve":
@@ -208,8 +290,8 @@ def main(argv=None):
             host=args.host,
             port=args.port,
             agent=args.serve_agent,
+            topic=args.serve_topic,
             session=args.serve_session,
-            session_file=args.serve_session_file,
             read_only=args.read_only,
             read_only_tools=args.read_only_tools,
         )
@@ -529,7 +611,11 @@ def main(argv=None):
                 return 2
 
             extra_args = args.args or []
-            run_agent(a["path"], llm, extra_args)
+            try:
+                run_agent(a["path"], llm, extra_args)
+            except ValueError as exc:
+                print(f"[red]{exc}[/red]")
+                return 2
             return 0
 
         if args.agent_cmd == "ask":
@@ -560,7 +646,11 @@ def main(argv=None):
                     print(response)
                 return 0
 
-            run_agent(a["path"], llm, prompt)
+            try:
+                run_agent(a["path"], llm, prompt)
+            except ValueError as exc:
+                print(f"[red]{exc}[/red]")
+                return 2
             return 0
         
         if args.agent_cmd == "set-llm":

@@ -15,7 +15,7 @@ from pipal.runner import (
     _find_native_pi,
     _read_agent_type,
     _strip_tool_flags,
-    _extract_session_name,
+    _extract_topic_name,
     _extension_paths,
     load_persona,
 )
@@ -87,7 +87,7 @@ class TestBuildPiCmd:
             llm_config={"provider": "anthropic", "model": "claude-opus-4-6"},
             extra_args=[],
             no_session=True,
-            session_name="main",
+            topic_name="main",
             system_prompt="test prompt",
         )
         assert cmd[0] == "pi"
@@ -104,13 +104,13 @@ class TestBuildPiCmd:
             llm_config={"provider": "ollama", "model": "test"},
             extra_args=[],
             no_session=False,
-            session_name="main",
+            topic_name="main",
             system_prompt=None,
         )
         assert "--session" in cmd
         session_idx = cmd.index("--session")
         session_file = cmd[session_idx + 1]
-        assert "sessions/main/" in session_file
+        assert "topics/main/sessions/" in session_file
         assert session_file.endswith(".jsonl")
 
     def test_extensions_included(self, default_agent):
@@ -119,7 +119,7 @@ class TestBuildPiCmd:
             llm_config={},
             extra_args=[],
             no_session=True,
-            session_name="main",
+            topic_name="main",
             system_prompt=None,
             include_extension=True,
         )
@@ -132,7 +132,7 @@ class TestBuildPiCmd:
             llm_config={},
             extra_args=[],
             no_session=True,
-            session_name="main",
+            topic_name="main",
             system_prompt=None,
             include_extension=False,
         )
@@ -149,11 +149,23 @@ class TestBuildPiCmd:
             llm_config={},
             extra_args=["-p", "hello world"],
             no_session=True,
-            session_name="main",
+            topic_name="main",
             system_prompt=None,
         )
         assert "-p" in cmd
         assert "hello world" in cmd
+
+    def test_explicit_native_session_is_not_overridden(self, default_agent):
+        cmd = _build_pi_cmd(
+            agent_path=str(default_agent),
+            llm_config={},
+            extra_args=["--session", "/tmp/native.jsonl"],
+            no_session=False,
+            topic_name="main",
+            system_prompt=None,
+        )
+        assert cmd.count("--session") == 1
+        assert cmd[-2:] == ["--session", "/tmp/native.jsonl"]
 
 
 # ── helper function tests ────────────────────────────────────────
@@ -168,15 +180,20 @@ class TestRunnerHelpers:
     def test_strip_tool_flags_empty(self):
         assert _strip_tool_flags([]) == []
 
-    def test_extract_session_name_default(self):
-        name, remaining = _extract_session_name(["--foo", "bar"])
+    def test_extract_topic_name_default(self):
+        name, remaining = _extract_topic_name(["--foo", "bar"])
         assert name == "main"
         assert remaining == ["--foo", "bar"]
 
-    def test_extract_session_name_custom(self):
-        name, remaining = _extract_session_name(["--session", "dev", "--foo"])
+    def test_extract_topic_name_custom(self):
+        name, remaining = _extract_topic_name(["--topic", "dev", "--foo"])
         assert name == "dev"
         assert remaining == ["--foo"]
+
+    def test_native_session_flag_passes_through(self):
+        name, remaining = _extract_topic_name(["--session", "native.jsonl"])
+        assert name == "main"
+        assert remaining == ["--session", "native.jsonl"]
 
     def test_extension_paths_default(self):
         paths = _extension_paths(None)
@@ -210,7 +227,7 @@ class TestPersonaIntegration:
         assert "ALWAYS use tools" in persona
 
     def test_default_persona_with_summary(self, default_agent):
-        summary_dir = default_agent / "sessions" / "main"
+        summary_dir = default_agent / "topics" / "main"
         summary_dir.mkdir(parents=True)
         (summary_dir / "summary.md").write_text("## Goal\nTest the system")
         # Summary is loaded separately in run_agent, not in load_persona
@@ -224,7 +241,7 @@ class TestSessionParsing:
 
     def test_parse_session_jsonl(self, default_agent):
         """Verify we can create and read back session entries."""
-        session_dir = default_agent / "sessions" / "main"
+        session_dir = default_agent / "topics" / "main" / "sessions"
         session_dir.mkdir(parents=True, exist_ok=True)
         session_file = session_dir / "test.jsonl"
 
@@ -267,15 +284,15 @@ class TestServerEndpoints:
         assert "test-default" in names
 
     def test_get_sessions_empty(self, client):
-        resp = client.get("/agents/test-default/sessions")
+        resp = client.get("/agents/test-default/topics")
         assert resp.status_code == 200
 
     def test_get_sessions_unknown_agent(self, client):
-        resp = client.get("/agents/nonexistent/sessions")
+        resp = client.get("/agents/nonexistent/topics")
         assert resp.status_code == 404
 
-    def test_create_session(self, client):
-        resp = client.post("/agents/test-default/sessions")
+    def test_create_topic(self, client):
+        resp = client.post("/agents/test-default/topics")
         assert resp.status_code == 200
         assert "name" in resp.json()
 
@@ -284,12 +301,12 @@ class TestServerEndpoints:
         from pipal.server import create_app
         app = create_app(read_only=True)
         client = TestClient(app)
-        resp = client.post("/agents/test-default/sessions")
+        resp = client.post("/agents/test-default/topics")
         assert resp.status_code == 403
 
     def test_session_history(self, client, default_agent):
         # Create a session with some content
-        session_dir = default_agent / "sessions" / "test-session"
+        session_dir = default_agent / "topics" / "test-topic" / "sessions"
         session_dir.mkdir(parents=True)
         session_file = session_dir / "20260101-000000.jsonl"
         entries = [
@@ -300,12 +317,22 @@ class TestServerEndpoints:
             for entry in entries:
                 f.write(json.dumps(entry) + "\n")
 
-        resp = client.get("/agents/test-default/sessions/test-session/history")
+        resp = client.get("/agents/test-default/topics/test-topic/history")
         assert resp.status_code == 200
         messages = resp.json()["messages"]
         assert len(messages) == 2
         assert messages[0]["role"] == "user"
         assert messages[1]["role"] == "assistant"
+
+        sessions_resp = client.get("/agents/test-default/topics/test-topic/sessions")
+        assert sessions_resp.status_code == 200
+        assert sessions_resp.json() == [{"name": "20260101-000000.jsonl"}]
+
+        session_resp = client.get(
+            "/agents/test-default/topics/test-topic/sessions/20260101-000000.jsonl/history"
+        )
+        assert session_resp.status_code == 200
+        assert session_resp.json()["messages"] == messages
 
 
 # ── pi binary tests (needs pi installed) ─────────────────────────

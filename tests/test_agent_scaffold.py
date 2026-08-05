@@ -12,7 +12,7 @@ def test_default_creates_expected_files(agent_dir):
     ensure_agent_scaffold(str(agent_dir), name="testy", template="default")
     for fname in ["AGENTS.md", "IDENTITY.md", "POLICY.md", "USER.md", "MEMORY.md"]:
         assert (agent_dir / fname).exists(), f"{fname} missing"
-    assert (agent_dir / "sessions").is_dir()
+    assert (agent_dir / "topics").is_dir()
 
 
 def test_default_substitutes_name(agent_dir):

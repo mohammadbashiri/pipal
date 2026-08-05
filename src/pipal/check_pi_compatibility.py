@@ -30,7 +30,7 @@ REQUIRED_FLAGS = [
     "--resume",
     "--tools",
 ]
-MIN_PI_VERSION = "0.66.1"
+MIN_PI_VERSION = "0.74.0"
 
 REMEDIATION = {
     "pi binary": [
@@ -121,7 +121,7 @@ async def _run_rpc_check(agent_path: str, llm: dict) -> tuple[bool, str]:
     client = PiRpcClient(
         settings=settings,
         agent_dir=Path(agent_path),
-        session_name="doctor",
+        topic_name="doctor",
         llm_config=llm,
         read_only_tools=True,
     )

@@ -30,8 +30,9 @@ Non-goals (current):
 │  │  USER.md      - human's profile        │  │
 │  │  MEMORY.md    - durable notes          │  │
 │  │  llm.json     - provider + model       │  │
-│  │  sessions/    - chat history (.jsonl)   │  │
-│  │  tasks/       - scheduled tasks        │  │
+│  │  topics/      - persistent topic data   │  │
+│  │    X/sessions - native pi JSONL files   │  │
+│  │  tasks/       - scheduled tasks         │  │
 │  └────────────────────────────────────────┘  │
 │                      │                       │
 │                      ▼                       │
@@ -46,8 +47,9 @@ When you run `pipal agent chat momo`, pipal:
 
 1. Looks up the agent in the registry (`~/.pipal/agents.json`)
 2. Reads all core markdown files and concatenates them into a system prompt
-3. Loads the rolling session summary (if any)
-4. Launches `pi` with `--append-system-prompt` and the agent's provider/model from `llm.json`
+3. Selects the requested Pipal topic (`main` by default)
+4. Creates a native pi session file inside that topic
+5. Launches `pi` with `--append-system-prompt` and the agent's provider/model from `llm.json`
 
 The agent's personality, memory, and rules are injected as context — pi handles the actual LLM interaction, tool execution, and session recording.
 
@@ -76,28 +78,32 @@ pipal supports multiple agent types via templates in `src/pipal/templates/`:
 
 The type is stored in `.pipal_type` at creation time and determines runtime behavior (tool restrictions, extensions, onboarding).
 
-## Sessions
+## Topics and sessions
 
-Chat history is stored as JSONL files under `sessions/<session_name>/`:
+Pipal distinguishes between two levels:
+
+- **Topic** — a persistent, named Pipal continuity container such as `main`, `work`, or `insurance`.
+- **Session** — one native pi JSONL conversation tree inside a topic.
 
 ```
-sessions/
+topics/
   main/
-    20260329-183738_2698d110.jsonl
-    20260330-091522_a1b2c3d4.jsonl
     summary.md
     summary.state.json
-    session.json
+    topic.json
+    sessions/
+      20260329-183738_2698d110.jsonl
+      20260330-091522_a1b2c3d4.jsonl
 ```
 
-Each chat launch creates a new `.jsonl` file. The `summary.md` is a rolling summary updated on session shutdown (via the rolling_summary extension).
+A normal chat launch creates a new native pi session. The topic's `summary.md` carries continuity across those sessions, while the rolling-summary extension also injects recent messages from the previous session. Existing legacy `sessions/<topic>/` directories are migrated automatically. See [topics.md](topics.md) for the full command and storage model.
 
 ## Extensions
 
 pipal ships three pi extensions (TypeScript):
 
 - **auto_greet.ts** — detects first-run vs returning user and sends appropriate greeting instruction. Uses the `onboarding.md` checklist to determine first-run status.
-- **rolling_summary.ts** — on session shutdown, compacts the session and updates `summary.md`. Also loads recent messages from the previous session file at startup.
+- **rolling_summary.ts** — on pi session shutdown, compacts the session and updates the containing topic's `summary.md`. It also loads recent messages from the previous pi session at startup.
 - **kbchat_greet.ts** — greeting for kbchat agents. Reads KB config and includes KB name in the greeting.
 
 Extensions are loaded via `--extension` when launching pi.
@@ -126,9 +132,9 @@ The daemon is a background process that wakes on interval, checks for due tasks,
 
 pipal includes an HTTP/WebSocket server (`pipal serve`) built with FastAPI:
 
-- **REST endpoints** — list agents, sessions, session files, chat history
+- **REST endpoints** — list agents, topics, native pi sessions, and chat history
 - **WebSocket** — real-time chat via pi's RPC mode
-- **Scoping** — restrict to a single agent/session
+- **Scoping** — restrict to a single agent/topic/session
 - **Auth** — optional bearer token via `PIPAL_AUTH_TOKEN` env var
 - **Read-only mode** — history-only, no prompts
 

@@ -19,8 +19,8 @@ Ironically I understand OpenClaw better now. But I'm good here :)
 
 A thin persistence layer on top of [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). It adds:
 - each agent gets its own identity, memory, and policy files
-- sessions stored per agent, not per directory
-- rolling summaries — a session can span many chats, and you decide which ones are worth remembering for the next
+- topics stored per agent, independent of the working directory
+- native pi sessions organized inside topics, with rolling summaries carrying continuity across chats
 - optional tasks, a daemon, and a local HTTP/WS server
 
 Built for local, single-user use. One person, one machine. Not a multi-tenant platform, not hardened for the public internet.
@@ -83,6 +83,28 @@ See [docs/releases.md](docs/releases.md) for:
 - release checklist
 - changelog discipline
 
+## Topics and pi sessions
+
+A **topic** is Pipal's persistent continuity container. Each topic contains one or more native **pi sessions** and a rolling summary.
+
+```bash
+pipal agent chat momo --topic work             # start a new pi session in topic "work"
+pipal agent chat momo --topic work --continue  # continue the latest pi session in that topic
+pipal topic list --agent momo
+pipal session list --agent momo --topic work
+```
+
+Storage:
+```text
+~/.pipal/agents/<agent>/topics/<topic>/
+├── summary.md
+├── topic.json
+└── sessions/
+    └── <timestamp>_<uuid>.jsonl
+```
+
+Existing `sessions/<topic>/` data from older Pipal versions is migrated automatically. See [docs/topics.md](docs/topics.md) for commands, storage, migration, and server API details.
+
 ## Tasks
 
 pipal supports scheduled and one-off tasks that agents can execute — manually or automatically via the daemon.
@@ -97,7 +119,7 @@ See [docs/tasks.md](docs/tasks.md) for full documentation: task format, scheduli
 
 ## Server
 
-The server is optional. Core `pipal` usage is CLI-first (`agent`, `session`, `task`, `daemon`).
+The server is optional. Core `pipal` usage is CLI-first (`agent`, `topic`, `session`, `task`, `daemon`).
 
 Run the HTTP/WS backend:
 ```bash

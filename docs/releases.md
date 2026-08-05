@@ -6,15 +6,28 @@
 
 ### Support policy
 
-- Minimum supported `pi-coding-agent` version: `0.66.1`
-- CI-tested targets: pinned `0.66.1` and `latest`
+- Minimum supported `pi-coding-agent` version: `0.74.0`
+- CI-tested targets: pinned `0.74.0` and `latest`
 
 | pipal version | minimum supported pi version | CI-tested pi versions | notes |
 |---|---|---|
 | 0.1.0 | 0.66.1 | 0.66.1, latest | baseline compatibility checks in CI |
-| unreleased (`main`) | 0.66.1 | 0.66.1, latest | validate before tagging |
+| unreleased (`main`, 0.2.0 candidate) | 0.74.0 | 0.74.0, latest | topics replace Pipal sessions; validate before tagging |
 
 When a pipal release is cut, update this table with the exact pipal tag and the tested `pi` version(s).
+
+## Unreleased — 0.2.0 candidate
+
+### Added
+
+- Native pi session listing, inspection, opening, and removal within a topic.
+- Topic/session documentation and automatic legacy-storage migration tests.
+
+### Changed
+
+- Renamed Pipal's persistent named `session` container to `topic`; `session` now consistently means a native pi JSONL session.
+- Changed storage from `sessions/<topic>/*.jsonl` to `topics/<topic>/sessions/*.jsonl`. Existing data is migrated automatically.
+- Replaced Pipal topic-management commands and server routes that previously used `session` terminology. This is a compatibility-impacting CLI and API change; see [topics.md](topics.md).
 
 ## Release checklist
 

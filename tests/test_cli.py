@@ -92,9 +92,17 @@ def test_parser_serve():
     assert args.read_only is True
 
 
-def test_parser_session_summarize():
+def test_parser_topic_summarize():
     p = build_parser()
-    args = p.parse_args(["session", "summarize", "--agent", "momo"])
+    args = p.parse_args(["topic", "summarize", "--agent", "momo", "--topic", "work"])
+    assert args.cmd == "topic"
+    assert args.topic_cmd == "summarize"
+    assert args.topic_name == "work"
+
+
+def test_parser_session_list():
+    p = build_parser()
+    args = p.parse_args(["session", "list", "--agent", "momo", "--topic", "work"])
     assert args.cmd == "session"
-    assert args.session_cmd == "summarize"
-    assert args.agent == "momo"
+    assert args.session_cmd == "list"
+    assert args.topic == "work"

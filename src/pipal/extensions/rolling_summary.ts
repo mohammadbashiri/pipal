@@ -81,7 +81,12 @@ const buildConversationText = (entries: SessionEntry[]): string => {
 
 const resolveSummaryPath = (sessionFile?: string | null): string | undefined => {
   if (!sessionFile) return undefined;
-  return path.join(path.dirname(sessionFile), SUMMARY_FILE_NAME);
+  const agentDir = process.env.PIPAL_AGENT_DIR;
+  const topicName = process.env.PIPAL_TOPIC;
+  if (agentDir && topicName) {
+    return path.join(agentDir, "topics", topicName, SUMMARY_FILE_NAME);
+  }
+  return path.join(path.dirname(path.dirname(sessionFile)), SUMMARY_FILE_NAME);
 };
 
 const ensureSummaryFile = (summaryPath: string) => {
@@ -102,11 +107,7 @@ const resolveAgentName = () => {
   return path.basename(agentDir);
 };
 
-const resolveSessionName = (sessionFile?: string | null) => {
-  if (!sessionFile) return undefined;
-  const sessionDir = path.dirname(sessionFile);
-  return path.basename(sessionDir);
-};
+const resolveTopicName = () => process.env.PIPAL_TOPIC;
 
 const resolveEntryTimestamp = (entry: SessionEntry): string | undefined => {
   const raw = entry.timestamp ?? entry.message?.timestamp;
@@ -207,10 +208,10 @@ export default function (pi: ExtensionAPI) {
     if (!summaryPath) return;
 
     const agentName = resolveAgentName();
-    const sessionName = resolveSessionName(sessionFile);
-    if (!agentName || !sessionName) {
-      logSummaryEvent(summaryPath, "Summarize skipped (missing agent/session name)");
-      if (ctx.hasUI) ctx.ui.notify("Rolling summary: skipped (missing agent/session)", "warning");
+    const topicName = resolveTopicName();
+    if (!agentName || !topicName) {
+      logSummaryEvent(summaryPath, "Summarize skipped (missing agent/topic name)");
+      if (ctx.hasUI) ctx.ui.notify("Rolling summary: skipped (missing agent/topic)", "warning");
       return;
     }
 
@@ -226,7 +227,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    logSummaryEvent(summaryPath, `Summarize start via CLI agent=${agentName} session=${sessionName}`);
+    logSummaryEvent(summaryPath, `Summarize start via CLI agent=${agentName} topic=${topicName}`);
 
     const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let spinnerIndex = 0;
@@ -261,12 +262,12 @@ export default function (pi: ExtensionAPI) {
       }
 
       const result = await pi.exec("pipal", [
-        "session",
+        "topic",
         "summarize",
         "--agent",
         agentName,
-        "--session",
-        sessionName,
+        "--topic",
+        topicName,
       ]);
 
       if (result.code !== 0) {

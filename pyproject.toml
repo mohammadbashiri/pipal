@@ -1,7 +1,7 @@
 [project]
 name = "pipal"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "A persistent agent layer on top of pi-coding-agent"
 readme = "README.md"
 authors = [
     { name = "Mo Bashiri", email = "mohammadbashiri93@gmail.com" }

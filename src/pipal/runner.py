@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from .topic_storage import topic_sessions_dir, validate_topic_name
+
 
 PERSONA_FILES = [
     "AGENTS.md",
@@ -106,18 +108,18 @@ PIPAL_CONTEXT_TEMPLATE = """\
 
 pipal is a persistence layer on top of pi. Your home is {agent_home}/.
 
-Sessions live under sessions/<name>/ — each session folder has a rolling summary.md plus per-launch .jsonl files.
+Topics live under topics/<name>/. Each topic has a rolling summary.md and contains native pi JSONL sessions under sessions/.
 
-Current session: {session_name}
+Current topic: {topic_name}
 
-For questions about prior context ("what did we do last time", etc.), read sessions/{session_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home."""
+For questions about prior context ("what did we do last time", etc.), read topics/{topic_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home."""
 
 
-def build_pipal_context(agent: Path, session_name: str) -> str:
+def build_pipal_context(agent: Path, topic_name: str) -> str:
     """Runtime-injected system context block teaching the agent about pipal."""
     return PIPAL_CONTEXT_TEMPLATE.format(
         agent_home=agent.resolve(),
-        session_name=session_name,
+        topic_name=topic_name,
     )
 
 
@@ -146,19 +148,19 @@ def _strip_tool_flags(args: list[str]) -> list[str]:
     return out
 
 
-def _extract_session_name(args: list[str]) -> tuple[str, list[str]]:
-    """Extract --session <name> from args. Returns (session_name, remaining_args)."""
+def _extract_topic_name(args: list[str]) -> tuple[str, list[str]]:
+    """Extract --topic <name> from args. Returns (topic_name, remaining_args)."""
     remaining = []
-    session_name = "main"
+    topic_name = "main"
     i = 0
     while i < len(args):
-        if args[i] == "--session" and i + 1 < len(args):
-            session_name = args[i + 1]
+        if args[i] == "--topic" and i + 1 < len(args):
+            topic_name = args[i + 1]
             i += 2
         else:
             remaining.append(args[i])
             i += 1
-    return session_name, remaining
+    return validate_topic_name(topic_name), remaining
 
 
 DEFAULT_EXTENSIONS = [
@@ -178,7 +180,7 @@ def _build_pi_cmd(
     llm_config: dict,
     extra_args: list[str],
     no_session: bool,
-    session_name: str,
+    topic_name: str,
     system_prompt: str | None,
     include_extension: bool = True,
     resume: bool = False,
@@ -202,10 +204,9 @@ def _build_pi_cmd(
     agent = Path(agent_path)
     if no_session:
         cmd.append("--no-session")
-    elif not resume:
-        # Folder-based sessions: new file per launch
-        sessions_dir = agent / "sessions" / session_name
-        sessions_dir.mkdir(parents=True, exist_ok=True)
+    elif not resume and "--session" not in extra_args and "--session-id" not in extra_args:
+        # A topic spans multiple native pi sessions; create one file per launch.
+        sessions_dir = topic_sessions_dir(agent, topic_name)
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         session_file = sessions_dir / f"{ts}_{uuid4().hex[:8]}.jsonl"
         cmd += ["--session", str(session_file.resolve())]
@@ -226,7 +227,7 @@ def _run_agent_cmd(
     extra_args: list[str],
     system_prompt: str,
     no_session: bool,
-    session_name: str,
+    topic_name: str,
     resume: bool,
     extensions: list[Path] | None = None,
 ):
@@ -235,25 +236,27 @@ def _run_agent_cmd(
         llm_config=llm_config,
         extra_args=extra_args,
         no_session=no_session,
-        session_name=session_name,
+        topic_name=topic_name,
         system_prompt=system_prompt,
         resume=resume,
         extensions=extensions,
     )
 
     os.environ["PIPAL_AGENT_DIR"] = str(Path(agent_path).resolve())
+    os.environ["PIPAL_TOPIC"] = topic_name
     pi_bin = _find_native_pi()
     os.execv(pi_bin, cmd)
 
 
 def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     """Invoke pi with persona context, passing through any extra CLI args."""
-    # Extract our flags before passing to pi
-    session_name, extra_args = _extract_session_name(extra_args)
+    # Extract Pipal flags before passing the rest to pi.
+    topic_name, extra_args = _extract_topic_name(extra_args)
     heartbeat_only = "--heartbeat-only" in extra_args
     routine_only = "--routine-only" in extra_args
     no_session = "--no-session" in extra_args
-    resume = "--resume" in extra_args
+    resume = "--resume" in extra_args or "-r" in extra_args
+    continue_recent = "--continue" in extra_args or "-c" in extra_args
     extra_args = [
         a for a in extra_args
         if a not in {"--heartbeat-only", "--routine-only", "--no-session"}
@@ -268,9 +271,16 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         extra_args = _strip_tool_flags(extra_args)
         extra_args += ["--tools", "read,grep,find,ls"]
 
+    if continue_recent and not no_session:
+        sessions_dir = topic_sessions_dir(agent, topic_name)
+        extra_args = [arg for arg in extra_args if arg not in {"--continue", "-c"}]
+        candidates = list(sessions_dir.glob("*.jsonl"))
+        if candidates:
+            latest = max(candidates, key=lambda path: (path.stat().st_mtime, path.name))
+            extra_args += ["--session", str(latest.resolve())]
+
     if resume and not no_session:
-        sessions_dir = agent / "sessions" / session_name
-        sessions_dir.mkdir(parents=True, exist_ok=True)
+        sessions_dir = topic_sessions_dir(agent, topic_name)
         if "--session-dir" not in extra_args:
             extra_args += ["--session-dir", str(sessions_dir.resolve())]
 
@@ -282,7 +292,7 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     else:
         persona = load_persona(agent_path)
         if agent_type != "kbchat" and not no_session:
-            pipal_context = build_pipal_context(agent, session_name)
+            pipal_context = build_pipal_context(agent, topic_name)
             system_prompt = f"{pipal_context}\n\n---\n\n{persona}" if persona else pipal_context
         else:
             system_prompt = persona
@@ -292,7 +302,7 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         llm_config=llm_config,
         extra_args=extra_args,
         no_session=no_session,
-        session_name=session_name,
+        topic_name=topic_name,
         system_prompt=system_prompt,
         resume=resume,
         extensions=_extension_paths(agent_type),
@@ -306,7 +316,7 @@ def run_agent_print(
     llm_config: dict,
     prompt: str,
     no_session: bool = True,
-    session_name: str = "main",
+    topic_name: str = "main",
 ) -> str:
     """Run pi in print mode and return the assistant response."""
     agent = Path(agent_path)
@@ -323,7 +333,7 @@ def run_agent_print(
         llm_config=llm_config,
         extra_args=extra_args,
         no_session=no_session,
-        session_name=session_name,
+        topic_name=topic_name,
         system_prompt=system_prompt,
         include_extension=True,
         extensions=_extension_paths(agent_type),
@@ -331,6 +341,7 @@ def run_agent_print(
 
     env = os.environ.copy()
     env["PIPAL_AGENT_DIR"] = str(agent.resolve())
+    env["PIPAL_TOPIC"] = topic_name
     env["PIPAL_DISABLE_AUTOGREET"] = "1"
 
     pi_bin = _find_native_pi()

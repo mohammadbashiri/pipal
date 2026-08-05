@@ -17,14 +17,14 @@ class PiRpcClient:
         self,
         settings: ServerSettings,
         agent_dir: Path,
-        session_name: str = "main",
+        topic_name: str = "main",
         session_file: Path | None = None,
         llm_config: dict[str, Any] | None = None,
         read_only_tools: bool = False,
     ):
         self.settings = settings
         self.agent_dir = agent_dir
-        self.session_name = session_name
+        self.topic_name = topic_name
         self.session_file = session_file
         self.llm_config = llm_config or {}
         self.read_only_tools = read_only_tools
@@ -37,12 +37,12 @@ class PiRpcClient:
         persona = load_persona(self.agent_dir)
         agent_type = read_agent_type(self.agent_dir)
         if agent_type != "kbchat":
-            pipal_context = build_pipal_context(self.agent_dir, self.session_name)
+            pipal_context = build_pipal_context(self.agent_dir, self.topic_name)
             system_prompt = f"{pipal_context}\n\n---\n\n{persona}" if persona else pipal_context
         else:
             system_prompt = persona
 
-        session_file = self.session_file or new_session_file(self.agent_dir, self.session_name)
+        session_file = self.session_file or new_session_file(self.agent_dir, self.topic_name)
         self.actual_session_file = session_file
         cmd = [self.settings.pi_bin, "--mode", "rpc", "--session", str(session_file)]
 
@@ -73,7 +73,11 @@ class PiRpcClient:
         if self.proc:
             return
         cmd = self._build_cmd()
-        env = {**dict(os.environ), "PIPAL_AGENT_DIR": str(self.agent_dir)}
+        env = {
+            **dict(os.environ),
+            "PIPAL_AGENT_DIR": str(self.agent_dir),
+            "PIPAL_TOPIC": self.topic_name,
+        }
         self.proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,

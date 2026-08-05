@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .runner import _find_native_pi
+from .topic_storage import topic_dir, topic_sessions_dir
 
 SUMMARY_FILE_NAME = "summary.md"
 SUMMARY_LOG_NAME = "summary.log"
@@ -206,23 +207,18 @@ def _run_pi_summary(prompt: str, provider: str, model: str) -> str | None:
     return output
 
 
-def summarize_session(agent_path: Path, session_name: str | None, llm_config: dict[str, Any]) -> SummaryResult:
-    sessions_dir = agent_path / "sessions"
-    if not sessions_dir.exists():
-        return SummaryResult("SKIP", "No sessions directory")
-
-    session_dir = sessions_dir / (session_name or "main")
-    if not session_dir.exists():
-        return SummaryResult("SKIP", f"Session not found: {session_dir}")
-
-    session_files = sorted(session_dir.glob("*.jsonl"))
+def summarize_topic(agent_path: Path, topic_name: str | None, llm_config: dict[str, Any]) -> SummaryResult:
+    name = topic_name or "main"
+    current_topic_dir = topic_dir(agent_path, name)
+    sessions_dir = topic_sessions_dir(agent_path, name)
+    session_files = sorted(sessions_dir.glob("*.jsonl"))
     if not session_files:
-        return SummaryResult("SKIP", f"No session files in {session_dir}")
+        return SummaryResult("SKIP", f"No pi sessions in topic: {name}")
 
-    summary_path = session_dir / SUMMARY_FILE_NAME
+    summary_path = current_topic_dir / SUMMARY_FILE_NAME
     summary_path.parent.mkdir(parents=True, exist_ok=True)
 
-    state_path = session_dir / SUMMARY_STATE_NAME
+    state_path = current_topic_dir / SUMMARY_STATE_NAME
     summarized = _load_summary_state(state_path)
 
     pending: list[tuple[str, str]] = []
