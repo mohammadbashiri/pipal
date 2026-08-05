@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/pipal_logo_darkbackground.svg">
-    <img src="assets/pipal_logo_lightbackground.svg" alt="pipal logo" width="128">
+    <img src="assets/pipal_logo_lightbackground.svg" alt="pipal logo" width="77">
   </picture>
 </p>
 
