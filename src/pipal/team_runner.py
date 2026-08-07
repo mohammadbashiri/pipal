@@ -27,6 +27,7 @@ def _member_context(
     topic_name: str,
     agent_path: Path,
     transcript_file: Path,
+    working_dir: Path,
 ) -> str:
     roster = "\n".join(
         f"- @{item['agent']}: {item.get('role', 'Member')}"
@@ -37,6 +38,7 @@ def _member_context(
 You are @{member['agent']}, the **{member.get('role', 'Member')}** in the Pipal team **{team['name']}**.
 The human owner is **{team.get('owner', 'the user')}**. The team manager is **@{team['manager']}**.
 Current shared topic: **{topic_name}**.
+Shared working directory: `{working_dir.resolve()}`. Run relative file and shell operations there unless explicitly asked to use another location.
 
 Team roster:
 {roster}
@@ -62,6 +64,7 @@ def _manager_context(
     topic_name: str,
     agent_path: Path,
     transcript_file: Path,
+    working_dir: Path,
 ) -> str:
     roster = "\n".join(
         f"- @{item['agent']}: {item.get('role', 'Member')}"
@@ -80,6 +83,7 @@ def _manager_context(
 
 You are @{team['manager']}, manager of the human-owned Pipal team **{team['name']}**.
 The owner is **{team.get('owner', 'the user')}**. Current shared topic: **{topic_name}**.
+Shared working directory: `{working_dir.resolve()}`. Run relative file and shell operations there unless explicitly asked to use another location.
 
 Team roster:
 {roster}
@@ -106,6 +110,7 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
     prompt_dir = current_topic / "runtime-prompts"
     prompt_dir.mkdir(parents=True, exist_ok=True)
     transcript_file = current_topic / "transcript.jsonl"
+    working_dir = Path.cwd().resolve()
 
     runtime_members: list[dict] = []
     for member in team.get("members", []):
@@ -122,7 +127,14 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
         member_session = member_session or _new_session_file(member_sessions)
 
         prompt = load_persona(agent["path"])
-        team_context = _member_context(team, member, topic_name, agent_path, transcript_file)
+        team_context = _member_context(
+            team,
+            member,
+            topic_name,
+            agent_path,
+            transcript_file,
+            working_dir,
+        )
         prompt_text = f"{team_context}\n\n---\n\n{prompt}" if prompt else team_context
         prompt_file = prompt_dir / f"{member['agent']}.md"
         prompt_file.write_text(prompt_text, encoding="utf-8")
@@ -155,6 +167,7 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
         topic_name,
         Path(manager["agent_path"]),
         transcript_file,
+        working_dir,
     )
     manager_prompt = f"{manager_context}\n\n---\n\n{manager_persona}" if manager_persona else manager_context
     manager_prompt_file = prompt_dir / f"{manager['agent']}-manager.md"
@@ -168,6 +181,7 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
         "topic": topic_name,
         "topic_dir": str(current_topic.resolve()),
         "transcript_file": str(transcript_file.resolve()),
+        "working_dir": str(working_dir),
         "native_pi": _find_native_pi(),
         "max_rounds": int(team.get("max_rounds", 4)),
         "members": runtime_members,

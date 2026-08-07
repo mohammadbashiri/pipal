@@ -33,6 +33,7 @@ interface TeamRuntime {
   topic: string;
   topic_dir: string;
   transcript_file: string;
+  working_dir: string;
   native_pi: string;
   max_rounds: number;
   members: RuntimeMember[];
@@ -158,7 +159,7 @@ function runMember(
 
   return new Promise((resolve, reject) => {
     const proc = spawn(runtime.native_pi, args, {
-      cwd: member.agent_path,
+      cwd: runtime.working_dir,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
@@ -295,13 +296,13 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   const byName = new Map(runtime.members.map((item) => [item.agent.toLowerCase(), item]));
   const toolDefinitions = new Map(runtime.members.map((member) => {
     const definitions = [
-      createBashToolDefinition(member.agent_path),
-      createReadToolDefinition(member.agent_path),
-      createWriteToolDefinition(member.agent_path),
-      createEditToolDefinition(member.agent_path),
-      createGrepToolDefinition(member.agent_path),
-      createFindToolDefinition(member.agent_path),
-      createLsToolDefinition(member.agent_path),
+      createBashToolDefinition(runtime.working_dir),
+      createReadToolDefinition(runtime.working_dir),
+      createWriteToolDefinition(runtime.working_dir),
+      createEditToolDefinition(runtime.working_dir),
+      createGrepToolDefinition(runtime.working_dir),
+      createFindToolDefinition(runtime.working_dir),
+      createLsToolDefinition(runtime.working_dir),
     ];
     return [member.agent, new Map(definitions.map((definition) => [definition.name, definition]))];
   }));
@@ -416,7 +417,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
           toolCallId: tool.id,
           invalidate: () => {},
           state: slot.state,
-          cwd: member?.agent_path ?? process.cwd(),
+          cwd: runtime.working_dir,
           executionStarted: true,
           argsComplete: true,
           isPartial: partial,
