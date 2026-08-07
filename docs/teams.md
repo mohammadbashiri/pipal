@@ -37,7 +37,9 @@ The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, a
 - `@team` and `@agent` autocomplete
 - role/model-labelled member responses
 - live member activity
-- delegation budgets to prevent loops
+- Escape or `/team-stop` cancellation
+- persistent timeout and failure events
+- agent-turn budgets to prevent loops
 
 Plain messages default to the manager. Explicit owner and agent mentions are dispatched directly and deterministically by Pipal:
 
@@ -55,7 +57,7 @@ Use `--new-session` to start fresh manager and member native sessions:
 pipal team chat mo-life-inc --topic career --new-session
 ```
 
-Without it, Pipal resumes the latest native sessions for that team topic.
+Without it, Pipal resumes the latest native sessions for that team topic. A topic lock prevents two room processes from mutating the same transcript and private sessions concurrently; stale locks from crashed processes are reclaimed automatically.
 
 ## Storage
 
@@ -75,8 +77,7 @@ Agents are told where the shared transcript lives and what it represents. They i
 
 ## Current limits
 
-- one manager and a flat member list
-- delegation is manager-mediated
+- one manager role and a flat team roster
 - no team-specific permissions or tool budgets yet
 - no team rolling-summary implementation yet
-- one flat team roster; richer hierarchy and permissions are not implemented yet
+- reopening restores message history but not historical tool-block rendering

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from pipal.team_runner import _session_for_cwd
+from pipal.team_runner import _acquire_room_lock, _release_room_lock, _session_for_cwd
 from pipal.team_storage import (
     create_team,
     list_teams,
@@ -41,6 +41,20 @@ def test_create_load_list_and_remove_team(tmp_path, monkeypatch):
     assert remove_team("life-board") is True
     assert load_team("life-board") is None
     assert remove_team("life-board") is False
+
+
+def test_team_topic_lock_rejects_live_owner_and_reclaims_stale_lock(tmp_path):
+    lock_file = tmp_path / ".room.lock"
+    _acquire_room_lock(lock_file)
+    with pytest.raises(ValueError, match="already open"):
+        _acquire_room_lock(lock_file)
+    _release_room_lock(lock_file)
+    assert not lock_file.exists()
+
+    lock_file.write_text("999999999\n", encoding="utf-8")
+    _acquire_room_lock(lock_file)
+    assert int(lock_file.read_text(encoding="utf-8")) > 0
+    _release_room_lock(lock_file)
 
 
 def test_session_is_forked_when_team_working_directory_changes(tmp_path):

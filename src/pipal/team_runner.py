@@ -15,6 +15,49 @@ from .team_storage import latest_jsonl, team_topic_dir
 TEAM_EXTENSION = Path(__file__).resolve().parent / "extensions" / "team_chat.ts"
 
 
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _acquire_room_lock(lock_file: Path) -> None:
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    for _attempt in range(2):
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            try:
+                owner_pid = int(lock_file.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                owner_pid = -1
+            if _pid_is_alive(owner_pid):
+                raise ValueError(
+                    f"Team topic is already open by process {owner_pid}: {lock_file.parent.name}"
+                )
+            lock_file.unlink(missing_ok=True)
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(f"{os.getpid()}\n")
+        return
+    raise ValueError(f"Could not acquire team topic lock: {lock_file}")
+
+
+def _release_room_lock(lock_file: Path) -> None:
+    try:
+        owner_pid = int(lock_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return
+    if owner_pid == os.getpid():
+        lock_file.unlink(missing_ok=True)
+
+
 def _new_session_file(directory: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -216,6 +259,7 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
         "working_dir": str(working_dir),
         "native_pi": _find_native_pi(),
         "max_rounds": int(team.get("max_rounds", 4)),
+        "agent_timeout_seconds": int(team.get("agent_timeout_seconds", 300)),
         "members": runtime_members,
     }
     runtime_path = current_topic / "runtime.json"
@@ -227,27 +271,34 @@ def run_team_chat(team: dict, topic_name: str, *, new_session: bool = False) -> 
     if not TEAM_EXTENSION.exists():
         raise FileNotFoundError(f"Missing team TUI extension: {TEAM_EXTENSION}")
 
-    runtime, _session_file = build_team_runtime(team, topic_name, new_session=new_session)
+    lock_file = team_topic_dir(team["name"], topic_name) / ".room.lock"
+    _acquire_room_lock(lock_file)
+    try:
+        runtime, _session_file = build_team_runtime(team, topic_name, new_session=new_session)
 
-    # Pi provides the familiar terminal shell, but Pipal owns the room. The host
-    # has no model turn or persisted session; every participant runs through its
-    # independent native Pi session and the shared transcript is canonical.
-    cmd = [
-        runtime["native_pi"],
-        "--no-session",
-        "--no-tools",
-        "--extension",
-        str(TEAM_EXTENSION),
-    ]
+        # Pi provides the familiar terminal shell, but Pipal owns the room. The host
+        # has no model turn or persisted session; every participant runs through its
+        # independent native Pi session and the shared transcript is canonical.
+        cmd = [
+            runtime["native_pi"],
+            "--no-session",
+            "--no-tools",
+            "--extension",
+            str(TEAM_EXTENSION),
+        ]
 
-    env = os.environ.copy()
-    env.pop("PIPAL_AGENT_DIR", None)
-    env.update(
-        {
-            "PIPAL_TEAM_RUNTIME": str((Path(runtime["topic_dir"]) / "runtime.json").resolve()),
-            "PIPAL_TEAM": runtime["team"],
-            "PIPAL_TOPIC": topic_name,
-            "PIPAL_DISABLE_AUTOGREET": "1",
-        }
-    )
-    os.execve(runtime["native_pi"], cmd, env)
+        env = os.environ.copy()
+        env.pop("PIPAL_AGENT_DIR", None)
+        env.update(
+            {
+                "PIPAL_TEAM_RUNTIME": str((Path(runtime["topic_dir"]) / "runtime.json").resolve()),
+                "PIPAL_TEAM": runtime["team"],
+                "PIPAL_TOPIC": topic_name,
+                "PIPAL_TEAM_LOCK_FILE": str(lock_file.resolve()),
+                "PIPAL_DISABLE_AUTOGREET": "1",
+            }
+        )
+        os.execve(runtime["native_pi"], cmd, env)
+    except BaseException:
+        _release_room_lock(lock_file)
+        raise
