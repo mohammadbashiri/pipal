@@ -29,7 +29,7 @@ pipal team remove mo-life-inc
 pipal team chat mo-life-inc --topic career
 ```
 
-The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, and launch working directory. The directory where `pipal team chat` is run becomes the shared working directory for manager and member tools. It also adds:
+The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, and launch working directory. The directory where `pipal team chat` is run becomes the shared working directory for manager and member tools. Native Pi sessions store their creation directory, so when a team topic is reopened from a different directory Pipal automatically forks each private session into the new working directory while preserving its history. The TUI also adds:
 
 - team, topic, owner, and manager header
 - visible roster with each agent's role and model

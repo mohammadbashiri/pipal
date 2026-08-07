@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from pipal.team_runner import _session_for_cwd
 from pipal.team_storage import (
     create_team,
     list_teams,
@@ -40,6 +41,38 @@ def test_create_load_list_and_remove_team(tmp_path, monkeypatch):
     assert remove_team("life-board") is True
     assert load_team("life-board") is None
     assert remove_team("life-board") is False
+
+
+def test_session_is_forked_when_team_working_directory_changes(tmp_path):
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    original_cwd = tmp_path / "old"
+    target_cwd = tmp_path / "project"
+    original_cwd.mkdir()
+    target_cwd.mkdir()
+    original = sessions / "original.jsonl"
+    original.write_text(
+        json.dumps({
+            "type": "session",
+            "version": 3,
+            "id": "old-id",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "cwd": str(original_cwd),
+        })
+        + "\n"
+        + json.dumps({"type": "message", "id": "message-1", "message": {"role": "user"}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    forked = _session_for_cwd(original, sessions, target_cwd)
+
+    assert forked != original
+    lines = [json.loads(line) for line in forked.read_text(encoding="utf-8").splitlines()]
+    assert lines[0]["cwd"] == str(target_cwd)
+    assert lines[0]["parentSession"] == str(original)
+    assert lines[1]["id"] == "message-1"
+    assert _session_for_cwd(forked, sessions, target_cwd) == forked
 
 
 def test_create_team_deduplicates_manager(tmp_path, monkeypatch):
