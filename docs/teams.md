@@ -62,13 +62,16 @@ Without it, Pipal resumes the latest native sessions for that team topic.
 ~/.pipal/teams/<team>/
   team.json
   topics/<topic>/
+    transcript.jsonl          # canonical shared room history
     runtime.json
     runtime-prompts/
-    sessions/                 # manager-facing Pi TUI session
-    members/<agent>/sessions/ # independent member Pi sessions
+    sessions/                 # manager-facing private Pi session
+    members/<agent>/sessions/ # independent private Pi sessions
 ```
 
-The team topic is the shared continuity boundary. The manager-facing session contains the canonical visible discussion; each member session preserves that member's delegated conversation history.
+The team topic is the shared continuity boundary. `transcript.jsonl` is the canonical ordered room history: owner and agent messages plus relevant visible tool activity, with attribution and timestamps. Each manager/member Pi session remains private working context.
+
+Agents are told where the shared transcript lives and what it represents. They inspect it lazily with Pi's `read` tool when a message references earlier discussion, asks them to confirm another agent, or otherwise requires shared context; Pipal does not inject the entire transcript into every turn.
 
 ## Current limits
 
@@ -76,4 +79,4 @@ The team topic is the shared continuity boundary. The manager-facing session con
 - delegation is manager-mediated
 - no team-specific permissions or tool budgets yet
 - no team rolling-summary implementation yet
-- member responses stream as visible team tool cards rather than independent top-level Pi assistant messages
+- the manager remains the routing/orchestration point

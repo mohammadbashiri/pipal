@@ -118,6 +118,7 @@ def team_topic_dir(team_name: str, topic_name: str = "main") -> Path:
     path.mkdir(parents=True, exist_ok=True)
     (path / "sessions").mkdir(parents=True, exist_ok=True)
     (path / "members").mkdir(parents=True, exist_ok=True)
+    (path / "transcript.jsonl").touch(exist_ok=True)
     return path
 
 

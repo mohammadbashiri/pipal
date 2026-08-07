@@ -35,6 +35,7 @@ def test_create_load_list_and_remove_team(tmp_path, monkeypatch):
     topic = team_topic_dir("life-board", "insurance")
     assert (topic / "sessions").is_dir()
     assert (topic / "members").is_dir()
+    assert (topic / "transcript.jsonl").is_file()
 
     assert remove_team("life-board") is True
     assert load_team("life-board") is None

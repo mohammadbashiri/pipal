@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -31,6 +32,7 @@ interface TeamRuntime {
   manager: string;
   topic: string;
   topic_dir: string;
+  transcript_file: string;
   native_pi: string;
   max_rounds: number;
   members: RuntimeMember[];
@@ -88,6 +90,23 @@ function loadRuntime(): TeamRuntime | null {
   }
 }
 
+function appendTranscript(runtime: TeamRuntime, event: Record<string, unknown>): void {
+  fs.appendFileSync(runtime.transcript_file, `${JSON.stringify({
+    schema_version: 1,
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    ...event,
+  })}\n`, "utf8");
+}
+
+function toolResultText(result: any): string {
+  if (!Array.isArray(result?.content)) return "";
+  return result.content
+    .filter((part: any) => part?.type === "text" && typeof part.text === "string")
+    .map((part: any) => part.text)
+    .join("\n");
+}
+
 function textFromMessage(message: any): string {
   if (!message || message.role !== "assistant" || !Array.isArray(message.content)) return "";
   return message.content
@@ -100,6 +119,16 @@ function textFromMessage(message: any): string {
 function stripAgentPrefix(text: string, agent: string): string {
   const escaped = agent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return text.replace(new RegExp(`^@?${escaped}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, "i"), "");
+}
+
+function readsTranscript(runtime: TeamRuntime, toolName: string, args: any): boolean {
+  if (toolName !== "read") return false;
+  const requested = String(args?.path ?? args?.file_path ?? "");
+  try {
+    return fs.realpathSync(requested) === fs.realpathSync(runtime.transcript_file);
+  } catch {
+    return requested === runtime.transcript_file;
+  }
 }
 
 function runMember(
@@ -175,13 +204,24 @@ function runMember(
       }
 
       if (event.type === "tool_execution_start") {
+        const toolName = String(event.toolName ?? "tool");
+        const args = event.args ?? {};
         tools.push({
           id: String(event.toolCallId),
-          name: String(event.toolName ?? "tool"),
-          args: event.args ?? {},
+          name: toolName,
+          args,
           status: "running",
         });
-        status = `using ${event.toolName ?? "tool"}`;
+        appendTranscript(runtime, readsTranscript(runtime, toolName, args) ? {
+          type: "history_read",
+          author: { kind: "agent", name: member.agent, role: member.role },
+        } : {
+          type: "tool_call",
+          author: { kind: "agent", name: member.agent, role: member.role },
+          tool: toolName,
+          args,
+        });
+        status = `using ${toolName}`;
         onProgress(snapshot());
       } else if (event.type === "tool_execution_update") {
         const tool = tools.find((item) => item.id === String(event.toolCallId));
@@ -193,6 +233,15 @@ function runMember(
           tool.result = event.result;
           tool.isError = Boolean(event.isError);
           tool.status = event.isError ? "failed" : "done";
+          if (!readsTranscript(runtime, tool.name, tool.args)) {
+            appendTranscript(runtime, {
+              type: "tool_result",
+              author: { kind: "agent", name: member.agent, role: member.role },
+              tool: tool.name,
+              output: toolResultText(event.result),
+              is_error: Boolean(event.isError),
+            });
+          }
         }
         onProgress(snapshot());
       } else if (event.type === "message_end" && event.message?.role === "assistant") {
@@ -312,6 +361,11 @@ export default function teamChatExtension(pi: ExtensionAPI) {
               details: partial,
             });
           });
+          appendTranscript(runtime, {
+            type: "message",
+            author: { kind: "agent", name: result.agent, role: result.role },
+            content: result.text || "(no response)",
+          });
           pi.appendEntry("pipal-team-agent-reply", {
             agent: result.agent,
             role: result.role,
@@ -415,11 +469,25 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   pi.on("input", (event) => {
     if (event.source === "interactive") delegationsThisRun = 0;
     const match = event.text.match(/^\\?@([\w.-]+)\s+([\s\S]+)/);
-    if (!match) return { action: "continue" };
+    if (!match) {
+      appendTranscript(runtime, {
+        type: "message",
+        author: { kind: "owner", name: runtime.owner, role: "Owner" },
+        target: runtime.manager,
+        content: event.text,
+      });
+      return { action: "continue" };
+    }
     const target = match[1];
     const body = match[2];
     const member = byName.get(target.toLowerCase());
     if (target.toLowerCase() !== "team" && !member) return { action: "continue" };
+    appendTranscript(runtime, {
+      type: "message",
+      author: { kind: "owner", name: runtime.owner, role: "Owner" },
+      target,
+      content: body,
+    });
 
     let instruction: string;
     if (target.toLowerCase() === "team") {
@@ -433,6 +501,40 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       action: "transform",
       text: `[[PIPAL_TEAM_ROUTE:${target}]]\nOwner message: ${body}\nRouting instruction: ${instruction}`,
     };
+  });
+
+  pi.on("tool_execution_start", (event) => {
+    if (event.toolName === "team_delegate") return;
+    appendTranscript(runtime, readsTranscript(runtime, event.toolName, event.args) ? {
+      type: "history_read",
+      author: { kind: "agent", name: runtime.manager, role: manager?.role ?? "Manager" },
+    } : {
+      type: "tool_call",
+      author: { kind: "agent", name: runtime.manager, role: manager?.role ?? "Manager" },
+      tool: event.toolName,
+      args: event.args,
+    });
+  });
+
+  pi.on("tool_execution_end", (event) => {
+    if (event.toolName === "team_delegate" || readsTranscript(runtime, event.toolName, event.args)) return;
+    appendTranscript(runtime, {
+      type: "tool_result",
+      author: { kind: "agent", name: runtime.manager, role: manager?.role ?? "Manager" },
+      tool: event.toolName,
+      output: toolResultText(event.result),
+      is_error: event.isError,
+    });
+  });
+
+  pi.on("message_end", (event) => {
+    const text = textFromMessage(event.message);
+    if (!text || text.trim() === "[[PIPAL_MEMBER_ONLY]]") return;
+    appendTranscript(runtime, {
+      type: "message",
+      author: { kind: "agent", name: runtime.manager, role: manager?.role ?? "Manager" },
+      content: stripAgentPrefix(text, runtime.manager),
+    });
   });
 
   pi.on("session_start", (_event, ctx) => {
@@ -495,7 +597,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     if (context.messageType === "user") {
       const routed = markdown.match(/^\[\[PIPAL_TEAM_ROUTE:([^\]]+)\]\]\nOwner message: ([\s\S]*?)\nRouting instruction:/);
       const visible = routed ? `@${routed[1]} ${routed[2]}` : markdown;
-      return `**${runtime.owner} · Owner**\n\n${visible}`;
+      return `**${runtime.owner} (Owner)**\n\n${visible}`;
     }
     return markdown;
   });

@@ -113,7 +113,7 @@ Extensions are loaded via `--extension` when launching pi.
 
 A team is a human-owned group of registered Pipal agents. It reuses topics as the conversation and continuity boundary instead of introducing a separate channel abstraction.
 
-`pipal team chat <team> --topic <topic>` starts the manager in Pi's normal interactive TUI with Pipal's `team_chat.ts` extension. The extension adds the roster, `@` completion, labelled member rendering, activity status, and a `team_delegate` tool. Delegates run in isolated native Pi sessions with their own persona, model, tools, and history. Their visible results return to the manager for synthesis.
+`pipal team chat <team> --topic <topic>` starts the manager in Pi's normal interactive TUI with Pipal's `team_chat.ts` extension. The extension adds the roster, `@` completion, labelled member rendering, activity status, and a `team_delegate` tool. Delegates run in isolated native Pi sessions with their own persona, model, tools, and history. A canonical append-only `transcript.jsonl` records the shared room timeline separately from those private sessions. Agents know how to inspect it lazily when a request requires prior shared context. Their visible results return to the manager for synthesis.
 
 The current implementation is deliberately manager-mediated and flat. It is a vertical slice toward roles, hierarchy, permissions, budgets, and richer agent-to-agent communication. See [teams.md](teams.md).
 
