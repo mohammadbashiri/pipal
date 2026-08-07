@@ -15,6 +15,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Loader, Markdown, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
+class CompactLoader extends Loader {
+  override render(width: number): string[] {
+    const lines = super.render(width);
+    return lines[0] === "" ? lines.slice(1) : lines;
+  }
+}
+
 interface RuntimeMember {
   agent: string;
   role: string;
@@ -384,7 +391,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       return;
     }
     ctx.ui.setWidget("pipal-team-spinner", (tui: any, theme: any) => {
-      activityLoader = new Loader(
+      activityLoader = new CompactLoader(
         tui,
         (text) => theme.fg("accent", text),
         (text) => theme.fg("muted", text),
