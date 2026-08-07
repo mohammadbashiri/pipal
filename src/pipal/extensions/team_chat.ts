@@ -13,7 +13,7 @@ import {
   createWriteToolDefinition,
   getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Markdown, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Box, Container, Loader, Markdown, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 interface RuntimeMember {
   agent: string;
@@ -364,13 +364,35 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   const nestedRenderers = new Map<string, { state: any; call?: any; result?: any }>();
   const active = new Set<string>();
   const queues = new Map<string, Promise<unknown>>();
+  let activityLoader: Loader | undefined;
   let delegationsThisRun = 0;
   let currentRoomAbort: AbortController | undefined;
   const delegationLimit = Math.max(1, runtime.max_rounds) * Math.max(1, runtime.members.length);
 
   const setActivity = (ctx: any) => {
-    if (active.size === 0) ctx.ui.setStatus("pipal-team-activity", undefined);
-    else ctx.ui.setStatus("pipal-team-activity", `team: ${[...active].map((name) => `@${name}`).join(", ")}`);
+    if (active.size === 0) {
+      activityLoader?.stop();
+      activityLoader = undefined;
+      ctx.ui.setWidget("pipal-team-spinner", undefined);
+      ctx.ui.setStatus("pipal-team-activity", undefined);
+      return;
+    }
+    const agents = [...active].map((name) => `@${name}`).join(", ");
+    const message = `Working · ${agents}`;
+    if (activityLoader) {
+      activityLoader.setMessage(message);
+      return;
+    }
+    ctx.ui.setWidget("pipal-team-spinner", (tui: any, theme: any) => {
+      activityLoader = new Loader(
+        tui,
+        (text) => theme.fg("accent", text),
+        (text) => theme.fg("muted", text),
+        message,
+      );
+      return activityLoader;
+    });
+    ctx.ui.setStatus("pipal-team-activity", `team: ${agents}`);
   };
 
   const renderAgentTools = (memberResults: MemberResult[], expanded: boolean, theme: any) => {
@@ -624,6 +646,12 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       ctx.ui.setStatus("pipal-team-activity", "team: cancelling…");
       ctx.ui.notify("Cancelling active team work", "warning");
     },
+  });
+
+  pi.on("session_shutdown", () => {
+    activityLoader?.stop();
+    activityLoader = undefined;
+    currentRoomAbort?.abort();
   });
 
   pi.on("session_start", (_event, ctx) => {

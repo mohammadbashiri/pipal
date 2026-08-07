@@ -36,7 +36,7 @@ The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, a
 - shared launch working directory shown in the header
 - `@team` and `@agent` autocomplete
 - role/model-labelled member responses
-- live member activity
+- animated live activity spinner showing every currently working agent
 - Escape or `/team-stop` cancellation
 - persistent timeout and failure events
 - agent-turn budgets to prevent loops
