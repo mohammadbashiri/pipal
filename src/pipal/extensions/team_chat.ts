@@ -370,6 +370,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   }));
   const nestedRenderers = new Map<string, { state: any; call?: any; result?: any }>();
   const active = new Set<string>();
+  const agentsWithVisibleTools = new Set<string>();
   const queues = new Map<string, Promise<unknown>>();
   let activityLoader: Loader | undefined;
   let delegationsThisRun = 0;
@@ -377,14 +378,15 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   const delegationLimit = Math.max(1, runtime.max_rounds) * Math.max(1, runtime.members.length);
 
   const setActivity = (ctx: any) => {
-    if (active.size === 0) {
+    const spinningAgents = [...active].filter((name) => !agentsWithVisibleTools.has(name));
+    if (spinningAgents.length === 0) {
       activityLoader?.stop();
       activityLoader = undefined;
       ctx.ui.setWidget("pipal-team-spinner", undefined);
       ctx.ui.setStatus("pipal-team-activity", undefined);
       return;
     }
-    const agents = [...active].map((name) => `@${name}`).join(", ");
+    const agents = spinningAgents.map((name) => `@${name}`).join(", ");
     const message = `Working · ${agents}`;
     if (activityLoader) {
       activityLoader.setMessage(message);
@@ -521,6 +523,8 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       try {
         const result = await runMember(runtime, member, from, message, signal, (partial) => {
           latest = partial;
+          if (partial.tools.length > 0) agentsWithVisibleTools.add(member.agent);
+          setActivity(ctx);
           ctx.ui.setWidget("pipal-team-live-tools", (_tui: any, theme: any) =>
             renderAgentTools(latest ? [latest] : [], true, theme));
         });
@@ -540,6 +544,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
         return result;
       } finally {
         ctx.ui.setWidget("pipal-team-live-tools", undefined);
+        agentsWithVisibleTools.delete(member.agent);
         active.delete(member.agent);
         setActivity(ctx);
       }
