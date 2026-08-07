@@ -33,6 +33,7 @@ The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, a
 
 - team, topic, owner, and manager header
 - visible roster with each agent's role and model
+- shared launch working directory shown in the header
 - `@team` and `@agent` autocomplete
 - role/model-labelled member responses
 - live member activity
@@ -46,7 +47,7 @@ Plain messages go to the manager. Direct mentions are routed through the manager
 @sasha Give me your own view first.
 ```
 
-Substantial questions can cause the manager to call several members in parallel before synthesizing their views. Member responses are tool results in the manager's native Pi session, so they are visible to the user and available to the manager's model context.
+Substantial questions can cause the manager to call several members in parallel before synthesizing their views. Member responses are tool results in the manager's native Pi session, so they are visible to the user and available to the manager's model context. If a member asks another member for input, the manager continues the exchange and routes the answer back to the requesting member within the configured delegation budget.
 
 Use `--new-session` to start fresh manager and member native sessions:
 
@@ -69,7 +70,7 @@ Without it, Pipal resumes the latest native sessions for that team topic.
     members/<agent>/sessions/ # independent private Pi sessions
 ```
 
-The team topic is the shared continuity boundary. `transcript.jsonl` is the canonical ordered room history: owner and agent messages plus relevant visible tool activity, with attribution and timestamps. Each manager/member Pi session remains private working context.
+The team topic is the shared continuity boundary. `transcript.jsonl` is the canonical ordered room history: launch context, owner and agent messages, and relevant visible tool activity, with attribution and timestamps. Each manager/member Pi session remains private working context.
 
 Agents are told where the shared transcript lives and what it represents. They inspect it lazily with Pi's `read` tool when a message references earlier discussion, asks them to confirm another agent, or otherwise requires shared context; Pipal does not inject the entire transcript into every turn.
 

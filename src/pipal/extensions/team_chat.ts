@@ -142,6 +142,8 @@ function runMember(
 ): Promise<MemberResult> {
   const task = [
     `Team message from @${from} in #${runtime.topic}:`,
+    `Shared working directory for this launch: ${runtime.working_dir}`,
+    "Treat that as the current directory for relative paths and current-directory questions; verify with a tool when needed.",
     "",
     message,
     "",
@@ -330,6 +332,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use team_delegate to obtain a real team member's view; never invent or paraphrase a consultation that did not occur.",
       "Use multiple team_delegate calls in one turn when independent parallel opinions are useful.",
+      "If a member asks another member for input, route that request and return the answer to the requesting member before ending the owner turn.",
     ],
     parameters: Type.Object({
       to: Type.String({ description: "Agent name without @" }),
@@ -496,7 +499,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     } else if (member?.agent === runtime.manager) {
       instruction = `The owner directly addressed you, @${runtime.manager}; answer directly unless delegation would materially help.`;
     } else {
-      instruction = `You MUST use team_delegate to send this message to @${member!.agent}. Their reply is displayed directly. Do not repeat or summarize it; after delegation respond exactly [[PIPAL_MEMBER_ONLY]].`;
+      instruction = `You MUST use team_delegate to send this message to @${member!.agent}. Their replies are displayed directly. If they ask other members for input, complete that exchange and return the answers to them before finishing. Handle requests addressed to you from your own perspective. Do not repeat or summarize the member's final reply; only after the requested exchange is complete, respond exactly [[PIPAL_MEMBER_ONLY]].`;
     }
     return {
       action: "transform",
@@ -539,6 +542,10 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    appendTranscript(runtime, {
+      type: "context",
+      working_dir: runtime.working_dir,
+    });
     if (ctx.mode !== "tui") return;
     ctx.ui.setTitle(`pipal · ${runtime.team} · ${runtime.topic}`);
     const mentionNames = new Set(["team", ...runtime.members.map((item) => item.agent.toLowerCase())]);
@@ -550,6 +557,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
         const lines = [
           theme.fg("accent", theme.bold(`PIPAL TEAM  ${runtime.team}`)),
           theme.fg("muted", `topic: ${runtime.topic}`),
+          theme.fg("muted", `working directory: ${runtime.working_dir}`),
           theme.fg("muted", `owner: ${runtime.owner}`),
           theme.fg("muted", `manager: @${runtime.manager}`),
           ...runtime.members
