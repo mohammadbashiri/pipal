@@ -110,8 +110,8 @@ def _manager_context(
         item for item in team.get("members", []) if item.get("agent") != team.get("manager")
     ]
     delegation_rule = (
-        "For substantive, ambiguous, or high-impact requests, consult relevant members with "
-        "team_delegate before answering. You can call multiple members in parallel."
+        "For substantive, ambiguous, or high-impact requests, consult relevant members by "
+        "@mentioning them in your response. Pipal deterministically routes those mentions and returns their replies to you."
         if other_members
         else "The team currently has no members besides you; answer directly."
     )
@@ -131,12 +131,10 @@ This append-only JSONL file is the team's canonical ordered chat history, separa
 
 Operating rules:
 - Use each member according to their role; do not ask everyone by default when one specialist is enough.
-- Never fabricate another member's opinion. Use team_delegate to actually consult them.
-- After delegation, synthesize the useful result and clearly surface meaningful disagreement.
-- If a member asks or @mentions another member for input, route the request, gather the response, and send it back to the requesting member so they can finish. If they address you, contribute your own answer when relaying the gathered context.
-- A direct @member message from the owner must be delegated to that member. Their replies are displayed directly; complete any requested member-to-member exchange before ending the turn, then do not repeat the final reply or add a manager summary.
+- Never fabricate another member's opinion. Explicitly @mention them to consult them.
+- When their replies are returned to you, synthesize the useful result and clearly surface meaningful disagreement.
 - Keep normal answers concise; let the visible team discussion provide supporting detail.
-- Stop delegating when the question is answered. Avoid agent loops and respect the configured turn budget.
+- Stop mentioning agents when the question is answered. Avoid loops and respect the configured turn budget.
 
 Your persistent agent home is {agent_path.resolve()}.
 """
@@ -194,10 +192,6 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
     if not manager:
         raise ValueError(f"Manager {team['manager']} is not a team member")
 
-    main_sessions = current_topic / "sessions"
-    main_session = None if new_session else latest_jsonl(main_sessions)
-    main_session = _session_for_cwd(main_session, main_sessions, working_dir)
-
     manager_persona = load_persona(manager["agent_path"])
     manager_context = _manager_context(
         team,
@@ -209,6 +203,7 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
     manager_prompt = f"{manager_context}\n\n---\n\n{manager_persona}" if manager_persona else manager_context
     manager_prompt_file = prompt_dir / f"{manager['agent']}-manager.md"
     manager_prompt_file.write_text(manager_prompt, encoding="utf-8")
+    manager["prompt_file"] = str(manager_prompt_file.resolve())
 
     runtime = {
         "schema_version": 1,
@@ -225,38 +220,33 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
     }
     runtime_path = current_topic / "runtime.json"
     runtime_path.write_text(json.dumps(runtime, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return runtime, main_session
+    return runtime, Path(manager["session_file"])
 
 
 def run_team_chat(team: dict, topic_name: str, *, new_session: bool = False) -> None:
     if not TEAM_EXTENSION.exists():
         raise FileNotFoundError(f"Missing team TUI extension: {TEAM_EXTENSION}")
 
-    runtime, session_file = build_team_runtime(team, topic_name, new_session=new_session)
-    manager = next(member for member in runtime["members"] if member["agent"] == runtime["manager"])
-    manager_prompt = Path(runtime["topic_dir"]) / "runtime-prompts" / f"{runtime['manager']}-manager.md"
+    runtime, _session_file = build_team_runtime(team, topic_name, new_session=new_session)
 
+    # Pi provides the familiar terminal shell, but Pipal owns the room. The host
+    # has no model turn or persisted session; every participant runs through its
+    # independent native Pi session and the shared transcript is canonical.
     cmd = [
         runtime["native_pi"],
-        "--session",
-        str(session_file.resolve()),
+        "--no-session",
+        "--no-tools",
         "--extension",
         str(TEAM_EXTENSION),
-        "--append-system-prompt",
-        str(manager_prompt.resolve()),
     ]
-    if manager.get("provider"):
-        cmd += ["--provider", manager["provider"]]
-    if manager.get("model"):
-        cmd += ["--model", manager["model"]]
 
     env = os.environ.copy()
+    env.pop("PIPAL_AGENT_DIR", None)
     env.update(
         {
             "PIPAL_TEAM_RUNTIME": str((Path(runtime["topic_dir"]) / "runtime.json").resolve()),
             "PIPAL_TEAM": runtime["team"],
             "PIPAL_TOPIC": topic_name,
-            "PIPAL_AGENT_DIR": manager["agent_path"],
             "PIPAL_DISABLE_AUTOGREET": "1",
         }
     )

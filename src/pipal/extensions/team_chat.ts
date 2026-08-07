@@ -47,11 +47,12 @@ class TeamEditor extends CustomEditor {
   override handleInput(data: string): void {
     if (this.teamKeybindings.matches(data, "tui.input.submit") && !this.isShowingAutocomplete()) {
       const text = this.getExpandedText();
-      const match = text.match(/^@([\w.-]+)\s+/);
-      if (match && this.mentionNames.has(match[1].toLowerCase())) {
-        // Pi reserves @... for file expansion. Escape known team mentions only at
-        // submission time; the editor and rendered owner message remain clean.
-        this.setText(`\\${text}`);
+      const escaped = text.replace(/@([\w.-]+)/g, (value, name) =>
+        this.mentionNames.has(String(name).toLowerCase()) ? `\\${value}` : value);
+      if (escaped !== text) {
+        // Pi reserves @... for file expansion. Escape known room mentions only
+        // at submission time; owner and transcript rendering remain clean.
+        this.setText(escaped);
       }
     }
     super.handleInput(data);
@@ -316,17 +317,174 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   const active = new Set<string>();
   const queues = new Map<string, Promise<unknown>>();
   let delegationsThisRun = 0;
-  const delegationLimit = Math.max(1, runtime.max_rounds) * Math.max(1, delegates.length);
+  let currentRoomAbort: AbortController | undefined;
+  const delegationLimit = Math.max(1, runtime.max_rounds) * Math.max(1, runtime.members.length);
 
   const setActivity = (ctx: any) => {
     if (active.size === 0) ctx.ui.setStatus("pipal-team-activity", undefined);
     else ctx.ui.setStatus("pipal-team-activity", `team: ${[...active].map((name) => `@${name}`).join(", ")}`);
   };
 
+  const renderAgentTools = (memberResults: MemberResult[], expanded: boolean, theme: any) => {
+    const container = new Container();
+    let firstTool = true;
+    for (const memberResult of memberResults) {
+      const member = byName.get(memberResult.agent.toLowerCase());
+      for (const tool of memberResult.tools ?? []) {
+        const key = `${memberResult.agent}:${tool.id}`;
+        const slot = nestedRenderers.get(key) ?? { state: {} };
+        nestedRenderers.set(key, slot);
+        const definition = member ? toolDefinitions.get(member.agent)?.get(tool.name) : undefined;
+        const partial = tool.status === "running";
+        const contextBase = {
+          args: tool.args,
+          toolCallId: tool.id,
+          invalidate: () => {},
+          state: slot.state,
+          cwd: runtime.working_dir,
+          executionStarted: true,
+          argsComplete: true,
+          isPartial: partial,
+          expanded,
+          showImages: false,
+          isError: Boolean(tool.isError),
+        };
+        const box = new Box(1, 1, (text) => theme.bg(
+          partial ? "toolPendingBg" : tool.isError ? "toolErrorBg" : "toolSuccessBg",
+          text,
+        ));
+        box.addChild(new Text(
+          theme.fg("accent", theme.bold(`@${memberResult.agent} (${memberResult.role})`)),
+          0,
+          0,
+        ));
+        if (definition?.renderCall) {
+          slot.call = definition.renderCall(tool.args, theme, { ...contextBase, lastComponent: slot.call });
+          box.addChild(slot.call);
+        } else {
+          box.addChild(new Text(`${tool.name} ${JSON.stringify(tool.args)}`, 0, 0));
+        }
+        if (tool.result) {
+          if (definition?.renderResult) {
+            slot.result = definition.renderResult(
+              tool.result,
+              { expanded, isPartial: partial },
+              theme,
+              { ...contextBase, lastComponent: slot.result },
+            );
+            box.addChild(slot.result);
+          } else {
+            const text = toolResultText(tool.result);
+            if (text) box.addChild(new Text(text, 0, 0));
+          }
+        }
+        if (!firstTool) container.addChild(new Spacer(1));
+        container.addChild(box);
+        firstTool = false;
+      }
+    }
+    return container;
+  };
+
+  pi.registerEntryRenderer("pipal-team-owner", (entry, _options, _theme) => {
+    const data = entry.data as { owner: string; text: string };
+    return new Markdown(`**${data.owner} (Owner)**\n\n${data.text}`, 0, 0, getMarkdownTheme());
+  });
+
+  pi.registerEntryRenderer("pipal-team-agent-tools", (entry, { expanded }, theme) => {
+    const data = entry.data as { result: MemberResult };
+    return renderAgentTools([data.result], expanded, theme);
+  });
+
   pi.registerEntryRenderer("pipal-team-agent-reply", (entry, _options, _theme) => {
     const data = entry.data as { agent: string; role: string; text: string };
     return new Markdown(`**@${data.agent} (${data.role}):** ${data.text}`, 0, 0, getMarkdownTheme());
   });
+
+  const mentionedMembers = (text: string, sender: string, ancestors: Set<string>): RuntimeMember[] => {
+    const found: RuntimeMember[] = [];
+    const seen = new Set<string>();
+    for (const match of text.matchAll(/@([\w.-]+)/g)) {
+      const name = match[1].toLowerCase();
+      const candidates = name === "team"
+        ? runtime.members
+        : ([byName.get(name)].filter(Boolean) as RuntimeMember[]);
+      for (const member of candidates) {
+        if (member.agent === sender || ancestors.has(member.agent) || seen.has(member.agent)) continue;
+        seen.add(member.agent);
+        found.push(member);
+      }
+    }
+    return found;
+  };
+
+  const runRoomThread = async (
+    member: RuntimeMember,
+    from: string,
+    message: string,
+    signal: AbortSignal,
+    ctx: any,
+    ancestors = new Set<string>(),
+  ): Promise<MemberResult> => {
+    if (delegationsThisRun >= delegationLimit) {
+      throw new Error(`Team turn budget reached (${delegationLimit} agent turns).`);
+    }
+    delegationsThisRun += 1;
+    const previous = queues.get(member.agent) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      active.add(member.agent);
+      setActivity(ctx);
+      let latest: MemberResult | undefined;
+      try {
+        const result = await runMember(runtime, member, from, message, signal, (partial) => {
+          latest = partial;
+          ctx.ui.setWidget("pipal-team-live-tools", (_tui: any, theme: any) =>
+            renderAgentTools(latest ? [latest] : [], true, theme));
+        });
+        if (result.tools.length > 0) {
+          pi.appendEntry("pipal-team-agent-tools", { result });
+        }
+        appendTranscript(runtime, {
+          type: "message",
+          author: { kind: "agent", name: result.agent, role: result.role },
+          content: result.text || "(no response)",
+        });
+        pi.appendEntry("pipal-team-agent-reply", {
+          agent: result.agent,
+          role: result.role,
+          text: result.text || "(no response)",
+        });
+        return result;
+      } finally {
+        ctx.ui.setWidget("pipal-team-live-tools", undefined);
+        active.delete(member.agent);
+        setActivity(ctx);
+      }
+    });
+    queues.set(member.agent, operation);
+    const result = await operation;
+    const nextAncestors = new Set(ancestors).add(member.agent);
+    const mentioned = mentionedMembers(result.text, member.agent, nextAncestors);
+    if (mentioned.length === 0) return result;
+
+    const replies = await Promise.all(mentioned.map((target) => runRoomThread(
+      target,
+      member.agent,
+      `@${member.agent} said:\n\n${result.text}\n\nYou were explicitly mentioned. Respond to @${member.agent}'s message.`,
+      signal,
+      ctx,
+      nextAncestors,
+    )));
+    const gathered = replies.map((reply) => `@${reply.agent} (${reply.role}): ${reply.text}`).join("\n\n");
+    return runRoomThread(
+      member,
+      "team",
+      `The agents you addressed replied:\n\n${gathered}\n\nContinue your response to the owner using their input. Only @mention someone if you need another response from them.`,
+      signal,
+      ctx,
+      ancestors,
+    );
+  };
 
   pi.registerTool({
     name: "team_delegate",
@@ -477,108 +635,67 @@ export default function teamChatExtension(pi: ExtensionAPI) {
 
     renderResult(result, { expanded }, theme) {
       const details = result.details as Partial<DelegationResult> | undefined;
-      const container = new Container();
-      let firstTool = true;
-
-      for (const memberResult of details?.results ?? []) {
-        const member = byName.get(memberResult.agent.toLowerCase());
-        for (const tool of memberResult.tools ?? []) {
-          const key = `${memberResult.agent}:${tool.id}`;
-          const slot = nestedRenderers.get(key) ?? { state: {} };
-          nestedRenderers.set(key, slot);
-          const definition = member ? toolDefinitions.get(member.agent)?.get(tool.name) : undefined;
-          const partial = tool.status === "running";
-          const contextBase = {
-            args: tool.args,
-            toolCallId: tool.id,
-            invalidate: () => {},
-            state: slot.state,
-            cwd: runtime.working_dir,
-            executionStarted: true,
-            argsComplete: true,
-            isPartial: partial,
-            expanded,
-            showImages: false,
-            isError: Boolean(tool.isError),
-          };
-          const box = new Box(1, 1, (text) => theme.bg(
-            partial ? "toolPendingBg" : tool.isError ? "toolErrorBg" : "toolSuccessBg",
-            text,
-          ));
-          box.addChild(new Text(
-            theme.fg("accent", theme.bold(`@${memberResult.agent} (${memberResult.role})`)),
-            0,
-            0,
-          ));
-
-          if (definition?.renderCall) {
-            slot.call = definition.renderCall(tool.args, theme, { ...contextBase, lastComponent: slot.call });
-            box.addChild(slot.call);
-          } else {
-            box.addChild(new Text(`${tool.name} ${JSON.stringify(tool.args)}`, 0, 0));
-          }
-
-          if (tool.result) {
-            if (definition?.renderResult) {
-              slot.result = definition.renderResult(
-                tool.result,
-                { expanded, isPartial: partial },
-                theme,
-                { ...contextBase, lastComponent: slot.result },
-              );
-              box.addChild(slot.result);
-            } else {
-              const text = tool.result?.content
-                ?.filter((part: any) => part?.type === "text")
-                .map((part: any) => part.text)
-                .join("\n");
-              if (text) box.addChild(new Text(text, 0, 0));
-            }
-          }
-          if (!firstTool) container.addChild(new Spacer(1));
-          container.addChild(box);
-          firstTool = false;
-        }
-      }
-      return container;
+      return renderAgentTools(details?.results ?? [], expanded, theme);
     },
   });
 
-  pi.on("input", (event) => {
-    if (event.source === "interactive") delegationsThisRun = 0;
-    const match = event.text.match(/^\\?@([\w.-]+)\s+([\s\S]+)/);
-    if (!match) {
-      appendTranscript(runtime, {
-        type: "message",
-        author: { kind: "owner", name: runtime.owner, role: "Owner" },
-        target: runtime.manager,
-        content: event.text,
-      });
-      return { action: "continue" };
+  pi.on("input", async (event, ctx) => {
+    delegationsThisRun = 0;
+    const text = event.text.replace(/\\@/g, "@");
+    const mentioned: RuntimeMember[] = [];
+    const seen = new Set<string>();
+    let wholeTeam = false;
+    for (const match of text.matchAll(/@([\w.-]+)/g)) {
+      const name = match[1].toLowerCase();
+      if (name === "team") {
+        wholeTeam = true;
+        continue;
+      }
+      const member = byName.get(name);
+      if (member && !seen.has(member.agent)) {
+        seen.add(member.agent);
+        mentioned.push(member);
+      }
     }
-    const target = match[1];
-    const body = match[2];
-    const member = byName.get(target.toLowerCase());
-    if (target.toLowerCase() !== "team" && !member) return { action: "continue" };
+    const targets = wholeTeam
+      ? runtime.members
+      : mentioned.length > 0
+        ? mentioned
+        : manager ? [manager] : [];
+    if (targets.length === 0) {
+      ctx.ui.notify("This team has no available agents", "error");
+      return { action: "handled" };
+    }
+
     appendTranscript(runtime, {
       type: "message",
       author: { kind: "owner", name: runtime.owner, role: "Owner" },
-      target,
-      content: body,
+      targets: targets.map((member) => member.agent),
+      content: text,
     });
+    pi.appendEntry("pipal-team-owner", { owner: runtime.owner, text });
 
-    let instruction: string;
-    if (target.toLowerCase() === "team") {
-      instruction = "You MUST send this message to every other team member with team_delegate, then synthesize the discussion.";
-    } else if (member?.agent === runtime.manager) {
-      instruction = `The owner directly addressed you, @${runtime.manager}; answer directly unless delegation would materially help.`;
-    } else {
-      instruction = `You MUST use team_delegate to send this message to @${member!.agent}. Their replies are displayed directly. If they ask other members for input, complete that exchange and return the answers to them before finishing. Handle requests addressed to you from your own perspective. Do not repeat or summarize the member's final reply; only after the requested exchange is complete, respond exactly [[PIPAL_MEMBER_ONLY]].`;
+    currentRoomAbort?.abort();
+    currentRoomAbort = new AbortController();
+    try {
+      const directTargets = new Set(targets.map((target) => target.agent));
+      await Promise.all(targets.map((target) => runRoomThread(
+        target,
+        runtime.owner,
+        text,
+        currentRoomAbort!.signal,
+        ctx,
+        new Set([...directTargets].filter((agent) => agent !== target.agent)),
+      )));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(message, currentRoomAbort.signal.aborted ? "warning" : "error");
+    } finally {
+      currentRoomAbort = undefined;
+      ctx.ui.setWidget("pipal-team-live-tools", undefined);
+      ctx.ui.setStatus("pipal-team-activity", undefined);
     }
-    return {
-      action: "transform",
-      text: `[[PIPAL_TEAM_ROUTE:${target}]]\nOwner message: ${body}\nRouting instruction: ${instruction}`,
-    };
+    return { action: "handled" };
   });
 
   pi.on("tool_execution_start", (event) => {
@@ -616,11 +733,29 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
+    try {
+      for (const line of fs.readFileSync(runtime.transcript_file, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type !== "message" || !event.author) continue;
+        if (event.author.kind === "owner") {
+          pi.appendEntry("pipal-team-owner", { owner: event.author.name, text: event.content });
+        } else if (event.author.kind === "agent") {
+          pi.appendEntry("pipal-team-agent-reply", {
+            agent: event.author.name,
+            role: event.author.role ?? "Member",
+            text: event.content,
+          });
+        }
+      }
+    } catch {
+      ctx.ui.notify("Could not restore the shared team transcript", "warning");
+    }
     appendTranscript(runtime, {
       type: "context",
       working_dir: runtime.working_dir,
     });
-    if (ctx.mode !== "tui") return;
     ctx.ui.setTitle(`pipal · ${runtime.team} · ${runtime.topic}`);
     const mentionNames = new Set(["team", ...runtime.members.map((item) => item.agent.toLowerCase())]);
     ctx.ui.setEditorComponent((tui, theme, keybindings) =>

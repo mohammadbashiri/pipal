@@ -1,6 +1,6 @@
 # Pipal teams
 
-A Pipal team is a human-owned group of registered Pipal agents. Each member has a role and its own persona, model, tools, and native Pi session. The manager is the primary participant in the Pi TUI and can delegate to other members through the `team_delegate` tool.
+A Pipal team is a human-owned group of registered Pipal agents. Each member has a role and its own persona, model, tools, and native Pi session. Pipal owns the shared room, transcript, routing, and TUI lifecycle; the manager is a privileged role and normal participant rather than the owner of the room.
 
 This is an early vertical slice. It proves visible multi-agent conversation inside the familiar Pi TUI; richer hierarchy, permissions, budgets, and team management are future work.
 
@@ -39,7 +39,7 @@ The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, a
 - live member activity
 - delegation budgets to prevent loops
 
-Plain messages go to the manager. Owner mentions are routed through the manager, while mentions emitted by agents are dispatched deterministically by Pipal:
+Plain messages default to the manager. Explicit owner and agent mentions are dispatched directly and deterministically by Pipal:
 
 ```text
 @team Evaluate this decision together.
@@ -47,7 +47,7 @@ Plain messages go to the manager. Owner mentions are routed through the manager,
 @sasha Give me your own view first.
 ```
 
-Substantial questions can cause the manager to call several members in parallel before synthesizing their views. Member responses are tool results in the manager's native Pi session, so they are visible to the user and available to the manager's model context. Pipal parses completed agent messages for known `@agent` mentions, runs every mentioned agent, and returns their replies to the requesting agent so it can continue. `@team` fans out to all other members. This runtime routing is deterministic and bounded by the configured agent-turn budget.
+For an unaddressed substantive question, the manager can consult specialists by mentioning them before synthesizing their views. Pipal parses every owner and agent message for known `@agent` mentions, runs every mentioned agent, and returns their replies to the requesting agent so it can continue. `@team` fans out to every member. This runtime routing is deterministic and bounded by the configured agent-turn budget.
 
 Use `--new-session` to start fresh manager and member native sessions:
 
@@ -66,7 +66,6 @@ Without it, Pipal resumes the latest native sessions for that team topic.
     transcript.jsonl          # canonical shared room history
     runtime.json
     runtime-prompts/
-    sessions/                 # manager-facing private Pi session
     members/<agent>/sessions/ # independent private Pi sessions
 ```
 
@@ -80,4 +79,4 @@ Agents are told where the shared transcript lives and what it represents. They i
 - delegation is manager-mediated
 - no team-specific permissions or tool budgets yet
 - no team rolling-summary implementation yet
-- the manager remains the routing/orchestration point
+- one flat team roster; richer hierarchy and permissions are not implemented yet
