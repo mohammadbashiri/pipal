@@ -35,6 +35,8 @@ interface DelegationRuntime {
   native_pi: string;
   agent_timeout_seconds?: number;
   max_turns?: number;
+  background_root?: string;
+  worker_python?: string;
   delegates: DelegateRuntime[];
 }
 
@@ -45,6 +47,13 @@ interface ToolRun {
   result?: any;
   isError?: boolean;
   status: "running" | "done" | "failed";
+}
+
+interface BackgroundResult {
+  background: true;
+  job_id: string;
+  agent: string;
+  status: string;
 }
 
 interface DelegateResult {
@@ -128,6 +137,58 @@ function assistantText(message: any): string {
 function stripPrefix(text: string, agent: string): string {
   const escaped = agent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return text.replace(new RegExp(`^@?(?:agent:)?${escaped}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, "i"), "");
+}
+
+function startBackgroundJob(
+  runtime: DelegationRuntime,
+  delegate: DelegateRuntime,
+  message: string,
+  acceptanceCriteria?: string,
+): BackgroundResult {
+  if (!runtime.background_root || !runtime.worker_python) {
+    throw new Error("Background delegation is unavailable in this runtime");
+  }
+  const jobId = `dg-${randomUUID().slice(0, 8)}`;
+  const jobDir = `${runtime.background_root}/${jobId}`;
+  fs.mkdirSync(jobDir, { recursive: true });
+  const sessionFile = `${jobDir}/session.jsonl`;
+  if (fs.existsSync(delegate.session_file)) {
+    const lines = fs.readFileSync(delegate.session_file, "utf8").split("\n").filter(Boolean);
+    const header = {
+      type: "session",
+      version: 3,
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      cwd: runtime.working_dir,
+      parentSession: delegate.session_file,
+    };
+    fs.writeFileSync(sessionFile, `${[JSON.stringify(header), ...lines.slice(1)].join("\n")}\n`, "utf8");
+  }
+  const jobFile = `${jobDir}/job.json`;
+  fs.writeFileSync(jobFile, `${JSON.stringify({
+    schema_version: 1,
+    id: jobId,
+    status: "queued",
+    created_at: new Date().toISOString(),
+    primary: runtime.primary,
+    topic: runtime.topic,
+    working_dir: runtime.working_dir,
+    native_pi: runtime.native_pi,
+    timeout_seconds: runtime.agent_timeout_seconds ?? 300,
+    delegate,
+    message,
+    acceptance_criteria: acceptanceCriteria,
+    session_file: sessionFile,
+    reported: false,
+  }, null, 2)}\n`, "utf8");
+  const worker = spawn(runtime.worker_python, ["-m", "pipal.delegation_worker", jobFile], {
+    cwd: runtime.working_dir,
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env },
+  });
+  worker.unref();
+  return { background: true, job_id: jobId, agent: delegate.agent, status: "queued" };
 }
 
 function runDelegate(
@@ -281,6 +342,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
   let callsThisTurn = 0;
   let directAbort: AbortController | undefined;
   let directLoader: Loader | undefined;
+  let backgroundPoller: NodeJS.Timeout | undefined;
 
   const renderTools = (result: DelegateResult, expanded: boolean, theme: any): Container => {
     const container = new Container();
@@ -353,12 +415,17 @@ export default function delegationExtension(pi: ExtensionAPI) {
       "Inspect the delegate's work. Continue the same agent thread with corrections or follow-up requests until the outcome is complete or genuinely blocked.",
       "Validate claims and artifacts where practical, then report the completed result rather than merely forwarding the delegate's response.",
       "Use parallel pipal_delegate calls when independent work can safely happen concurrently.",
+      "Foreground is the default. Use background mode only when the owner explicitly asks, or after suggesting it for long independent work.",
       "Respect user approval boundaries for critical or external actions.",
     ],
     parameters: Type.Object({
       agent: Type.String({ description: "Registered Pipal agent name, without @agent:" }),
       message: Type.String({ description: "The next clear message in this persistent delegation thread" }),
       acceptance_criteria: Type.Optional(Type.String({ description: "Concrete conditions for considering this delegated work complete" })),
+      mode: Type.Optional(Type.Union([
+        Type.Literal("foreground"),
+        Type.Literal("background"),
+      ], { description: "Foreground by default; background only when explicitly requested" })),
     }),
     renderShell: "self",
     async execute(_id, params, signal, onUpdate) {
@@ -366,6 +433,13 @@ export default function delegationExtension(pi: ExtensionAPI) {
       if (!delegate) throw new Error(`Unknown Pipal agent ${params.agent}. Available: ${available}`);
       if (callsThisTurn >= (runtime.max_turns ?? 8)) throw new Error(`Delegation turn budget reached (${runtime.max_turns ?? 8})`);
       callsThisTurn += 1;
+      if (params.mode === "background") {
+        const background = startBackgroundJob(runtime, delegate, params.message, params.acceptance_criteria);
+        return {
+          content: [{ type: "text", text: `Background delegation ${background.job_id} assigned to @agent:${delegate.agent}. It will continue if this TUI closes.` }],
+          details: background,
+        };
+      }
       appendEvent(delegate, {
         type: "message",
         author: runtime.primary,
@@ -393,8 +467,11 @@ export default function delegationExtension(pi: ExtensionAPI) {
       return new Text(`${theme.fg("accent", theme.bold(`@agent:${String(args.agent).replace(/^@?agent:/, "")}`))}\n${theme.fg("dim", String(args.message ?? ""))}`, 1, 0);
     },
     renderResult(result, { expanded, isPartial }, theme) {
-      const details = result.details as DelegateResult | undefined;
+      const details = result.details as DelegateResult | BackgroundResult | undefined;
       if (!details) return new Text("", 0, 0);
+      if ("background" in details) {
+        return new Text(theme.fg("accent", `↗ ${details.job_id} · @agent:${details.agent} · running in background`), 1, 0);
+      }
       const container = renderTools(details, expanded, theme);
       if (details.text || !isPartial) {
         const response = new Box(1, 1, (value) => theme.bg("toolSuccessBg", value));
@@ -418,6 +495,55 @@ export default function delegationExtension(pi: ExtensionAPI) {
   });
   pi.registerEntryRenderer("pipal-direct-error", (entry, _options, theme) =>
     new Text(theme.fg("error", `Delegation error: ${(entry.data as { text: string }).text}`), 0, 0));
+  pi.registerEntryRenderer("pipal-background-result", (entry, _options, theme) => {
+    const job = entry.data as any;
+    const color = job.status === "completed" ? "success" : "error";
+    const body = job.status === "completed" ? job.result : job.error;
+    return new Markdown(`${theme.fg(color, theme.bold(`${job.id} · @agent:${job.delegate.agent} · ${job.status}`))}\n\n${body ?? ""}`, 0, 0, getMarkdownTheme());
+  });
+
+  const readBackgroundJobs = (): any[] => {
+    if (!runtime.background_root || !fs.existsSync(runtime.background_root)) return [];
+    const jobs: any[] = [];
+    for (const name of fs.readdirSync(runtime.background_root)) {
+      const jobFile = `${runtime.background_root}/${name}/job.json`;
+      try { jobs.push(JSON.parse(fs.readFileSync(jobFile, "utf8"))); } catch { /* incomplete job write */ }
+    }
+    return jobs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  };
+  const reportFinishedJobs = () => {
+    for (const job of readBackgroundJobs()) {
+      if (job.reported || !["completed", "failed", "cancelled"].includes(job.status)) continue;
+      pi.appendEntry("pipal-background-result", job);
+      job.reported = true;
+      fs.writeFileSync(`${runtime.background_root}/${job.id}/job.json`, `${JSON.stringify(job, null, 2)}\n`, "utf8");
+    }
+  };
+
+  pi.registerTool({
+    name: "pipal_delegation_status",
+    label: "Check background delegations",
+    description: "List persistent background delegation jobs or retrieve one completed result for review.",
+    promptSnippet: "Inspect background delegation status and results",
+    parameters: Type.Object({
+      job_id: Type.Optional(Type.String({ description: "Optional delegation id such as dg-1234abcd" })),
+    }),
+    async execute(_id, params) {
+      const jobs = readBackgroundJobs();
+      const selected = params.job_id ? jobs.filter((job) => job.id === params.job_id) : jobs;
+      if (params.job_id && selected.length === 0) throw new Error(`Unknown background delegation ${params.job_id}`);
+      return { content: [{ type: "text", text: JSON.stringify(selected, null, 2) }], details: { count: selected.length } };
+    },
+  });
+
+  pi.registerCommand("delegations", {
+    description: "Show background delegation jobs",
+    handler: async (_args, ctx) => {
+      const jobs = readBackgroundJobs();
+      if (jobs.length === 0) return ctx.ui.notify("No background delegations", "info");
+      ctx.ui.notify(jobs.map((job) => `${job.id} @agent:${job.delegate.agent} ${job.status}`).join("\n"), "info");
+    },
+  });
 
   pi.on("input", async (event, ctx) => {
     callsThisTurn = 0;
@@ -468,6 +594,8 @@ export default function delegationExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
+    reportFinishedJobs();
+    backgroundPoller = setInterval(reportFinishedJobs, 2000);
     const names = new Set(runtime.delegates.map((delegate) => delegate.agent.toLowerCase()));
     ctx.ui.setEditorComponent((tui, theme, keybindings) => new DelegationEditor(
       tui,
@@ -506,5 +634,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     directAbort?.abort();
     directLoader?.stop();
+    if (backgroundPoller) clearInterval(backgroundPoller);
+    backgroundPoller = undefined;
   });
 }

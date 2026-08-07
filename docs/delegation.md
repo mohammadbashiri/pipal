@@ -33,12 +33,25 @@ The primary owns the outcome. It should not act as a one-shot relay. It is instr
 
 Critical or external actions still require the owner's normal approval.
 
+## Foreground and background modes
+
+Visible foreground work is the default. It keeps tool activity transparent and interruptible. When the owner explicitly asks to run a long independent task in the background, the primary can set `mode: "background"` on `pipal_delegate`. Pipal returns a durable `dg-...` job id immediately, runs the delegate in a detached worker with an isolated native session, and reports completion in the TUI even if the original TUI was closed and reopened.
+
+```text
+Sasha, have Ada do this in the background.
+```
+
+Use `/delegations` to list background jobs. The primary can call `pipal_delegation_status` to inspect a result, review it, and decide whether a foreground correction/follow-up is needed. Background mode is never selected silently for important work.
+
 ## Storage
 
 ```text
 ~/.pipal/agents/<primary>/topics/<topic>/delegations/
   runtime.json
   runtime-prompts/
+  jobs/<dg-id>/
+    job.json
+    session.jsonl
   <delegate>/
     transcript.jsonl
     sessions/*.jsonl
@@ -52,3 +65,4 @@ The transcript is the durable direct/delegation thread. The delegate's native Pi
 - Native Pi cancellation applies to `pipal_delegate` tool calls.
 - Agent turns time out after five minutes by default.
 - Repeated delegation calls are bounded per primary turn.
+- `/delegations` lists durable background jobs.

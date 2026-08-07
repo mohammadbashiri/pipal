@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from .conversation_runtime import session_for_cwd
@@ -108,6 +109,8 @@ def build_delegation_runtime(
         "native_pi": _find_native_pi(),
         "agent_timeout_seconds": 300,
         "max_turns": 8,
+        "background_root": str((root / "jobs").resolve()),
+        "worker_python": sys.executable,
         "delegates": delegates,
     }
     runtime_file = root / "runtime.json"
