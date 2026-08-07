@@ -1,7 +1,17 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CustomEditor, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import {
+  CustomEditor,
+  createBashToolDefinition,
+  createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
+  createWriteToolDefinition,
+  getMarkdownTheme,
+} from "@earendil-works/pi-coding-agent";
 import { Box, Container, Markdown, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -45,6 +55,15 @@ class TeamEditor extends CustomEditor {
   }
 }
 
+interface MemberToolRun {
+  id: string;
+  name: string;
+  args: any;
+  result?: any;
+  isError?: boolean;
+  status: "running" | "done" | "failed";
+}
+
 interface MemberResult {
   agent: string;
   role: string;
@@ -56,6 +75,7 @@ interface MemberResult {
   cost: number;
   exitCode: number;
   status?: string;
+  tools: MemberToolRun[];
 }
 
 function loadRuntime(): TeamRuntime | null {
@@ -77,6 +97,11 @@ function textFromMessage(message: any): string {
     .trim();
 }
 
+function stripAgentPrefix(text: string, agent: string): string {
+  const escaped = agent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`^@?${escaped}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, "i"), "");
+}
+
 function runMember(
   runtime: TeamRuntime,
   member: RuntimeMember,
@@ -90,7 +115,7 @@ function runMember(
     "",
     message,
     "",
-    `Respond as @${member.agent}, the ${member.role}. Give your independent contribution to the shared discussion.`,
+    `Respond as @${member.agent}, the ${member.role}. Give your independent contribution to the shared discussion. Return only the response body; the UI adds your name and role.`,
   ].join("\n");
 
   const args = [
@@ -124,6 +149,7 @@ function runMember(
     let outputTokens = 0;
     let cost = 0;
     let status = "thinking";
+    const tools: MemberToolRun[] = [];
 
     const snapshot = (exitCode = -1): MemberResult => ({
       agent: member.agent,
@@ -136,6 +162,7 @@ function runMember(
       cost,
       exitCode,
       status,
+      tools: tools.map((tool) => ({ ...tool })),
     });
 
     const processEvent = (line: string) => {
@@ -148,11 +175,29 @@ function runMember(
       }
 
       if (event.type === "tool_execution_start") {
+        tools.push({
+          id: String(event.toolCallId),
+          name: String(event.toolName ?? "tool"),
+          args: event.args ?? {},
+          status: "running",
+        });
         status = `using ${event.toolName ?? "tool"}`;
+        onProgress(snapshot());
+      } else if (event.type === "tool_execution_update") {
+        const tool = tools.find((item) => item.id === String(event.toolCallId));
+        if (tool) tool.result = event.partialResult;
+        onProgress(snapshot());
+      } else if (event.type === "tool_execution_end") {
+        const tool = tools.find((item) => item.id === String(event.toolCallId));
+        if (tool) {
+          tool.result = event.result;
+          tool.isError = Boolean(event.isError);
+          tool.status = event.isError ? "failed" : "done";
+        }
         onProgress(snapshot());
       } else if (event.type === "message_end" && event.message?.role === "assistant") {
         const current = textFromMessage(event.message);
-        if (current) finalText = current;
+        if (current) finalText = stripAgentPrefix(current, member.agent);
         turns += 1;
         const usage = event.message.usage;
         inputTokens += usage?.input ?? 0;
@@ -192,11 +237,6 @@ function runMember(
   });
 }
 
-function formatTokens(value: number): string {
-  if (value < 1000) return String(value);
-  return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}k`;
-}
-
 export default function teamChatExtension(pi: ExtensionAPI) {
   const runtime = loadRuntime();
   if (!runtime) return;
@@ -204,6 +244,19 @@ export default function teamChatExtension(pi: ExtensionAPI) {
   const manager = runtime.members.find((item) => item.agent === runtime.manager);
   const delegates = runtime.members.filter((item) => item.agent !== runtime.manager);
   const byName = new Map(runtime.members.map((item) => [item.agent.toLowerCase(), item]));
+  const toolDefinitions = new Map(runtime.members.map((member) => {
+    const definitions = [
+      createBashToolDefinition(member.agent_path),
+      createReadToolDefinition(member.agent_path),
+      createWriteToolDefinition(member.agent_path),
+      createEditToolDefinition(member.agent_path),
+      createGrepToolDefinition(member.agent_path),
+      createFindToolDefinition(member.agent_path),
+      createLsToolDefinition(member.agent_path),
+    ];
+    return [member.agent, new Map(definitions.map((definition) => [definition.name, definition]))];
+  }));
+  const nestedRenderers = new Map<string, { state: any; call?: any; result?: any }>();
   const active = new Set<string>();
   const queues = new Map<string, Promise<unknown>>();
   let delegationsThisRun = 0;
@@ -213,6 +266,11 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     if (active.size === 0) ctx.ui.setStatus("pipal-team-activity", undefined);
     else ctx.ui.setStatus("pipal-team-activity", `team: ${[...active].map((name) => `@${name}`).join(", ")}`);
   };
+
+  pi.registerEntryRenderer("pipal-team-agent-reply", (entry, _options, _theme) => {
+    const data = entry.data as { agent: string; role: string; text: string };
+    return new Markdown(`**@${data.agent} (${data.role}):** ${data.text}`, 0, 0, getMarkdownTheme());
+  });
 
   pi.registerTool({
     name: "team_delegate",
@@ -254,6 +312,11 @@ export default function teamChatExtension(pi: ExtensionAPI) {
               details: partial,
             });
           });
+          pi.appendEntry("pipal-team-agent-reply", {
+            agent: result.agent,
+            role: result.role,
+            text: result.text || "(no response)",
+          });
           return {
             content: [{ type: "text", text: result.text || "(no response)" }],
             details: result,
@@ -275,43 +338,77 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       return operation;
     },
 
-    renderCall(args, theme) {
-      const name = String(args.to ?? "member").replace(/^@/, "");
-      const member = byName.get(name.toLowerCase());
-      const label = member ? `${member.role}${member.model ? ` · ${member.model}` : ""}` : "team member";
-      return new Text(
-        `${theme.fg("accent", theme.bold(`@${name}`))} ${theme.fg("muted", label)}\n${theme.fg("dim", String(args.message ?? ""))}`,
-        1,
-        0,
-      );
+    renderCall() {
+      // Delegation is orchestration, not a visible member tool. Member tool calls
+      // are rendered below with their native Pi renderers.
+      return new Text("", 0, 0);
     },
 
-    renderResult(result, { isPartial }, theme) {
+    renderResult(result, { expanded }, theme) {
       const details = result.details as Partial<MemberResult> | undefined;
-      const name = details?.agent ?? "member";
-      const role = details?.role ?? "Team member";
-      const model = details?.model ? ` · ${details.model}` : "";
-      const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
+      const tools = details?.tools ?? [];
+      const member = details?.agent ? byName.get(details.agent.toLowerCase()) : undefined;
       const container = new Container();
-      const state = isPartial ? ` ${theme.fg("warning", details?.status ?? "thinking")}` : "";
-      container.addChild(new Text(`${theme.fg("accent", theme.bold(`@${name}`))} ${theme.fg("muted", `${role}${model}`)}${state}`, 0, 0));
-      container.addChild(new Spacer(1));
-      const body = result.content.find((part) => part.type === "text");
-      container.addChild(new Markdown(body?.type === "text" ? body.text : "(no response)", 0, 0, getMarkdownTheme()));
-      if (!isPartial && details) {
-        const stats = [
-          details.turns ? `${details.turns} turn${details.turns === 1 ? "" : "s"}` : "",
-          details.inputTokens ? `↑${formatTokens(details.inputTokens)}` : "",
-          details.outputTokens ? `↓${formatTokens(details.outputTokens)}` : "",
-          details.cost ? `$${details.cost.toFixed(4)}` : "",
-        ].filter(Boolean).join(" ");
-        if (stats) {
-          container.addChild(new Spacer(1));
-          container.addChild(new Text(theme.fg("dim", stats), 0, 0));
+      let firstTool = true;
+
+      for (const tool of tools) {
+        const key = `${details?.agent ?? "member"}:${tool.id}`;
+        const slot = nestedRenderers.get(key) ?? { state: {} };
+        nestedRenderers.set(key, slot);
+        const definition = member ? toolDefinitions.get(member.agent)?.get(tool.name) : undefined;
+        const partial = tool.status === "running";
+        const contextBase = {
+          args: tool.args,
+          toolCallId: tool.id,
+          invalidate: () => {},
+          state: slot.state,
+          cwd: member?.agent_path ?? process.cwd(),
+          executionStarted: true,
+          argsComplete: true,
+          isPartial: partial,
+          expanded,
+          showImages: false,
+          isError: Boolean(tool.isError),
+        };
+        const box = new Box(1, 1, (text) => theme.bg(
+          partial ? "toolPendingBg" : tool.isError ? "toolErrorBg" : "toolSuccessBg",
+          text,
+        ));
+        box.addChild(new Text(
+          theme.fg("accent", theme.bold(`@${details?.agent ?? "member"} (${details?.role ?? "Team member"})`)),
+          0,
+          0,
+        ));
+
+        if (definition?.renderCall) {
+          slot.call = definition.renderCall(tool.args, theme, { ...contextBase, lastComponent: slot.call });
+          box.addChild(slot.call);
+        } else {
+          box.addChild(new Text(`${tool.name} ${JSON.stringify(tool.args)}`, 0, 0));
         }
+
+        if (tool.result) {
+          if (definition?.renderResult) {
+            slot.result = definition.renderResult(
+              tool.result,
+              { expanded, isPartial: partial },
+              theme,
+              { ...contextBase, lastComponent: slot.result },
+            );
+            box.addChild(slot.result);
+          } else {
+            const text = tool.result?.content
+              ?.filter((part: any) => part?.type === "text")
+              .map((part: any) => part.text)
+              .join("\n");
+            if (text) box.addChild(new Text(text, 0, 0));
+          }
+        }
+        if (!firstTool) container.addChild(new Spacer(1));
+        container.addChild(box);
+        firstTool = false;
       }
-      box.addChild(container);
-      return box;
+      return container;
     },
   });
 
@@ -330,7 +427,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     } else if (member?.agent === runtime.manager) {
       instruction = `The owner directly addressed you, @${runtime.manager}; answer directly unless delegation would materially help.`;
     } else {
-      instruction = `You MUST use team_delegate to send this message to @${member!.agent}, then return their response with only necessary manager context.`;
+      instruction = `You MUST use team_delegate to send this message to @${member!.agent}. Their reply is displayed directly. Do not repeat or summarize it; after delegation respond exactly [[PIPAL_MEMBER_ONLY]].`;
     }
     return {
       action: "transform",
@@ -389,9 +486,11 @@ export default function teamChatExtension(pi: ExtensionAPI) {
 
   pi.registerMarkdownTransformer((markdown, context) => {
     if (context.messageType === "assistant") {
+      const silentMarker = "[[PIPAL_MEMBER_ONLY]]";
+      const current = markdown.trim();
+      if (current === silentMarker || (current.length > 0 && silentMarker.startsWith(current))) return "";
       const role = manager?.role ?? "Manager";
-      const model = manager?.model ? ` · ${manager.model}` : "";
-      return `**@${runtime.manager} · ${role}${model}**\n\n${markdown}`;
+      return `**@${runtime.manager} (${role}):** ${markdown}`;
     }
     if (context.messageType === "user") {
       const routed = markdown.match(/^\[\[PIPAL_TEAM_ROUTE:([^\]]+)\]\]\nOwner message: ([\s\S]*?)\nRouting instruction:/);
