@@ -7,6 +7,8 @@ from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_regis
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
+from .team_runner import run_team_chat
+from .team_storage import create_team, list_teams, load_team, remove_team, team_dir
 from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
 from .topic_summary import summarize_topic
 from .topic_storage import topics_root, topic_dir, topic_sessions_dir, validate_topic_name
@@ -86,6 +88,37 @@ def build_parser():
     p_set.add_argument("spec", nargs="?", default=None, help='Either "provider:model" or omit to use flags')
     p_set.add_argument("--provider", default=None)
     p_set.add_argument("--model", default=None)
+
+    # ── team subcommands ──
+    pteam = sub.add_parser("team", help="Create and chat with human-owned AI teams")
+    team_sub = pteam.add_subparsers(dest="team_cmd")
+
+    team_create = team_sub.add_parser("create", help="Create a team from registered Pipal agents")
+    team_create.add_argument("name")
+    team_create.add_argument("--manager", required=True, help="Registered agent that manages the team")
+    team_create.add_argument(
+        "--member",
+        action="append",
+        default=[],
+        metavar="AGENT:ROLE",
+        help="Add a member and role; repeat for multiple members",
+    )
+    team_create.add_argument("--owner", default="Mo", help="Human owner display name (default: Mo)")
+    team_create.add_argument("--max-rounds", type=int, default=4, help="Agent delegation round budget")
+
+    team_sub.add_parser("list", help="List teams")
+
+    team_show = team_sub.add_parser("show", help="Show team configuration")
+    team_show.add_argument("name")
+
+    team_chat = team_sub.add_parser("chat", help="Open the multi-agent team TUI")
+    team_chat.add_argument("name")
+    team_chat.add_argument("--topic", default="main", help="Shared team topic (default: main)")
+    team_chat.add_argument("--new-session", action="store_true", help="Start fresh native sessions")
+
+    team_remove = team_sub.add_parser("remove", help="Remove a team and its shared topics")
+    team_remove.add_argument("name")
+    team_remove.add_argument("--yes", action="store_true", help="Skip confirmation")
 
     # ── topic subcommands ──
     ptopic = sub.add_parser("topic", help="Manage persistent Pipal topics")
@@ -185,6 +218,84 @@ def main(argv=None):
         print("[green]Migrated[/green] agent registry to ~/.pipal/agents.json")
 
     args = build_parser().parse_args(argv)
+
+    if args.cmd == "team":
+        if args.team_cmd == "create":
+            if not get_agent(args.manager):
+                print(f"[red]Unknown manager agent[/red] {args.manager}. Run: pipal agent list")
+                return 2
+            try:
+                members = [parse_team_member_spec(value) for value in args.member]
+            except ValueError as exc:
+                print(f"[red]{exc}[/red]")
+                return 2
+            unknown = sorted({agent for agent, _role in members if not get_agent(agent)})
+            if unknown:
+                print(f"[red]Unknown team agent(s)[/red] {', '.join(unknown)}. Run: pipal agent list")
+                return 2
+            try:
+                team = create_team(
+                    args.name,
+                    args.manager,
+                    members,
+                    owner=args.owner,
+                    max_rounds=args.max_rounds,
+                )
+            except ValueError as exc:
+                print(f"[red]{exc}[/red]")
+                return 2
+            print(f"[green]Created[/green] team [bold]{team['name']}[/bold]")
+            print(f"[cyan]Owner[/cyan] {team['owner']}  [cyan]Manager[/cyan] @{team['manager']}")
+            for member in team["members"]:
+                print(f"- @{member['agent']}  {member['role']}")
+            print(f"[dim]{team_dir(team['name'])}[/dim]")
+            return 0
+
+        if args.team_cmd == "list":
+            teams = list_teams()
+            if not teams:
+                print("[yellow]No teams found[/yellow]")
+                return 0
+            for team in teams:
+                print(
+                    f"- [bold]{team.get('name', '-')}[/bold]  "
+                    f"manager=@{team.get('manager', '-')}  members={len(team.get('members', []))}"
+                )
+            return 0
+
+        team = load_team(getattr(args, "name", ""))
+        if not team:
+            print(f"[red]Unknown team[/red] {getattr(args, 'name', '')}. Run: pipal team list")
+            return 2
+
+        if args.team_cmd == "show":
+            print(f"[bold]{team['name']}[/bold]")
+            print(f"Owner:      {team.get('owner', '-')}")
+            print(f"Manager:    @{team.get('manager', '-')}")
+            print(f"Max rounds: {team.get('max_rounds', '-')}")
+            print("Members:")
+            for member in team.get("members", []):
+                print(f"- @{member.get('agent', '-')}  {member.get('role', 'Member')}")
+            print(f"Path:       {team_dir(team['name'])}")
+            return 0
+
+        if args.team_cmd == "chat":
+            try:
+                run_team_chat(team, args.topic, new_session=args.new_session)
+            except (ValueError, FileNotFoundError) as exc:
+                print(f"[red]{exc}[/red]")
+                return 2
+            return 0
+
+        if args.team_cmd == "remove":
+            if not args.yes and not Confirm.ask(
+                f"Delete team {team['name']} and all shared topics?", default=False
+            ):
+                print("[yellow]Cancelled[/yellow]")
+                return 0
+            remove_team(team["name"])
+            print(f"[green]Removed[/green] team {team['name']}")
+            return 0
 
     if args.cmd == "topic":
         agent = get_agent(args.agent)
@@ -767,6 +878,16 @@ def main(argv=None):
 
     print("[yellow]Tip:[/yellow] use `pipal agent ...`")
     return 0
+
+def parse_team_member_spec(spec: str) -> tuple[str, str]:
+    if not spec or ":" not in spec:
+        raise ValueError('Invalid member. Expected "agent:role".')
+    agent, role = spec.split(":", 1)
+    agent, role = agent.strip(), role.strip()
+    if not agent or not role:
+        raise ValueError('Invalid member. Expected "agent:role".')
+    return agent, role
+
 
 def parse_llm_spec(spec: str):
     if not spec or ":" not in spec:

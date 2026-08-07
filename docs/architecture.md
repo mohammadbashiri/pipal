@@ -17,7 +17,8 @@ Non-goals (current):
 ┌─────────────────────────────────────────────┐
 │                   pipal                      │
 │                                              │
-│  CLI (pipal agent chat/ask/create/remove)    │
+│  CLI (agent, team, topic, task management)   │
+│  Team TUI (visible multi-agent delegation)   │
 │  Server (HTTP/WS via FastAPI)                │
 │  Daemon (background task scheduler)          │
 │                                              │
@@ -107,6 +108,14 @@ pipal ships three pi extensions (TypeScript):
 - **kbchat_greet.ts** — greeting for kbchat agents. Reads KB config and includes KB name in the greeting.
 
 Extensions are loaded via `--extension` when launching pi.
+
+## Teams
+
+A team is a human-owned group of registered Pipal agents. It reuses topics as the conversation and continuity boundary instead of introducing a separate channel abstraction.
+
+`pipal team chat <team> --topic <topic>` starts the manager in Pi's normal interactive TUI with Pipal's `team_chat.ts` extension. The extension adds the roster, `@` completion, labelled member rendering, activity status, and a `team_delegate` tool. Delegates run in isolated native Pi sessions with their own persona, model, tools, and history. Their visible results return to the manager for synthesis.
+
+The current implementation is deliberately manager-mediated and flat. It is a vertical slice toward roles, hierarchy, permissions, budgets, and richer agent-to-agent communication. See [teams.md](teams.md).
 
 ## Tasks and daemon
 

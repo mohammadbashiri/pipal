@@ -25,6 +25,7 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 - identity, memory, and policy files for each agent
 - topics that persist independently of the working directory
 - native Pi sessions inside topics, with rolling summaries across chats
+- human-owned AI teams with visible multi-agent conversation in Pi's TUI
 - optional tasks, a daemon, and a local HTTP/WS server
 
 Built for local, single-user use. One person, one machine. Not a multi-tenant platform. Not hardened for the public internet.
@@ -56,5 +57,17 @@ Make sure `pi` works first. Then create and chat with a pipal agent:
 pipal agent create momo
 pipal agent chat momo
 ```
+
+Create a team from registered agents and open a shared topic:
+
+```bash
+pipal team create product-team \
+  --manager momo \
+  --member researcher:Researcher \
+  --member reviewer:Reviewer
+pipal team chat product-team --topic planning
+```
+
+See [Pipal teams](docs/teams.md) for the multi-agent TUI and current limits.
 
 To learn what else pipal does, use `--help` or ask your agent to check out the repo.

@@ -1,5 +1,5 @@
 import pytest
-from pipal.cli import build_parser, parse_llm_spec
+from pipal.cli import build_parser, parse_llm_spec, parse_team_member_spec
 
 
 # ── parse_llm_spec ───────────────────────────────────────────────
@@ -36,6 +36,15 @@ def test_parse_llm_spec_missing_provider():
         parse_llm_spec(":model")
 
 
+def test_parse_team_member_spec():
+    assert parse_team_member_spec("ada:Researcher") == ("ada", "Researcher")
+
+
+def test_parse_team_member_spec_invalid():
+    with pytest.raises(ValueError):
+        parse_team_member_spec("ada")
+
+
 # ── build_parser ─────────────────────────────────────────────────
 
 def test_parser_agent_create():
@@ -65,6 +74,28 @@ def test_parser_agent_list():
     p = build_parser()
     args = p.parse_args(["agent", "list"])
     assert args.agent_cmd == "list"
+
+
+def test_parser_team_create():
+    p = build_parser()
+    args = p.parse_args([
+        "team", "create", "life-board",
+        "--manager", "sasha",
+        "--member", "ada:Researcher",
+        "--member", "raven:Reviewer",
+    ])
+    assert args.cmd == "team"
+    assert args.team_cmd == "create"
+    assert args.manager == "sasha"
+    assert args.member == ["ada:Researcher", "raven:Reviewer"]
+
+
+def test_parser_team_chat():
+    p = build_parser()
+    args = p.parse_args(["team", "chat", "life-board", "--topic", "insurance"])
+    assert args.team_cmd == "chat"
+    assert args.name == "life-board"
+    assert args.topic == "insurance"
 
 
 def test_parser_task_list():
