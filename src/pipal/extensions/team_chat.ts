@@ -81,6 +81,10 @@ interface MemberResult {
   tools: MemberToolRun[];
 }
 
+interface DelegationResult {
+  results: MemberResult[];
+}
+
 function loadRuntime(): TeamRuntime | null {
   const runtimePath = process.env.PIPAL_TEAM_RUNTIME;
   if (!runtimePath) return null;
@@ -341,59 +345,128 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     renderShell: "self",
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const member = byName.get(params.to.replace(/^@/, "").toLowerCase());
-      if (!member || member.agent === runtime.manager) {
+      const initialMember = byName.get(params.to.replace(/^@/, "").toLowerCase());
+      if (!initialMember || initialMember.agent === runtime.manager) {
         throw new Error(`Unknown delegate @${params.to}. Available: ${delegates.map((item) => `@${item.agent}`).join(", ")}`);
       }
-      if (delegationsThisRun >= delegationLimit) {
-        throw new Error(`Team turn budget reached (${delegationLimit} delegations). Synthesize or ask the owner to continue.`);
-      }
-      delegationsThisRun += 1;
 
-      const previous = queues.get(member.agent) ?? Promise.resolve();
-      const operation = previous.catch(() => undefined).then(async () => {
-        active.add(member.agent);
-        setActivity(ctx);
-        onUpdate?.({
-          content: [{ type: "text", text: `@${member.agent} is thinking…` }],
-          details: { agent: member.agent, role: member.role, model: member.model, status: "thinking" },
-        });
-        try {
-          const result = await runMember(runtime, member, runtime.manager, params.message, signal, (partial) => {
-            onUpdate?.({
-              content: [{ type: "text", text: partial.text || `@${member.agent} is ${partial.status ?? "thinking"}…` }],
-              details: partial,
-            });
-          });
-          appendTranscript(runtime, {
-            type: "message",
-            author: { kind: "agent", name: result.agent, role: result.role },
-            content: result.text || "(no response)",
-          });
-          pi.appendEntry("pipal-team-agent-reply", {
-            agent: result.agent,
-            role: result.role,
-            text: result.text || "(no response)",
-          });
-          return {
-            content: [{ type: "text", text: result.text || "(no response)" }],
-            details: result,
-            usage: {
-              input: result.inputTokens,
-              output: result.outputTokens,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: result.inputTokens + result.outputTokens,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.cost },
-            },
-          };
-        } finally {
-          active.delete(member.agent);
-          setActivity(ctx);
-        }
+      const results: MemberResult[] = [];
+      const publish = (status: string) => onUpdate?.({
+        content: [{ type: "text", text: status }],
+        details: { results: [...results] } satisfies DelegationResult,
       });
-      queues.set(member.agent, operation);
-      return operation;
+
+      const runOne = async (member: RuntimeMember, from: string, message: string): Promise<MemberResult> => {
+        if (delegationsThisRun >= delegationLimit) {
+          throw new Error(`Team turn budget reached (${delegationLimit} agent turns).`);
+        }
+        delegationsThisRun += 1;
+        const resultIndex = results.length;
+        results.push({
+          agent: member.agent,
+          role: member.role,
+          model: member.model,
+          text: "",
+          turns: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cost: 0,
+          exitCode: -1,
+          status: "thinking",
+          tools: [],
+        });
+        const previous = queues.get(member.agent) ?? Promise.resolve();
+        const operation = previous.catch(() => undefined).then(async () => {
+          active.add(member.agent);
+          setActivity(ctx);
+          publish(`@${member.agent} is thinking…`);
+          try {
+            const result = await runMember(runtime, member, from, message, signal, (partial) => {
+              results[resultIndex] = partial;
+              publish(partial.text || `@${member.agent} is ${partial.status ?? "thinking"}…`);
+            });
+            results[resultIndex] = result;
+            appendTranscript(runtime, {
+              type: "message",
+              author: { kind: "agent", name: result.agent, role: result.role },
+              content: result.text || "(no response)",
+            });
+            pi.appendEntry("pipal-team-agent-reply", {
+              agent: result.agent,
+              role: result.role,
+              text: result.text || "(no response)",
+            });
+            return result;
+          } finally {
+            active.delete(member.agent);
+            setActivity(ctx);
+          }
+        });
+        queues.set(member.agent, operation);
+        return operation;
+      };
+
+      const mentionsIn = (text: string, sender: string, ancestors: Set<string>): RuntimeMember[] => {
+        const found: RuntimeMember[] = [];
+        const seen = new Set<string>();
+        for (const match of text.matchAll(/@([\w.-]+)/g)) {
+          const name = match[1].toLowerCase();
+          const candidates = name === "team" ? runtime.members : [byName.get(name)].filter(Boolean) as RuntimeMember[];
+          for (const member of candidates) {
+            if (member.agent === sender || ancestors.has(member.agent) || seen.has(member.agent)) continue;
+            seen.add(member.agent);
+            found.push(member);
+          }
+        }
+        return found;
+      };
+
+      const runThread = async (
+        member: RuntimeMember,
+        from: string,
+        message: string,
+        ancestors = new Set<string>(),
+      ): Promise<MemberResult> => {
+        const result = await runOne(member, from, message);
+        const nextAncestors = new Set(ancestors).add(member.agent);
+        const mentioned = mentionsIn(result.text, member.agent, nextAncestors);
+        if (mentioned.length === 0) return result;
+
+        const replies = await Promise.all(mentioned.map((target) => runThread(
+          target,
+          member.agent,
+          `@${member.agent} said:\n\n${result.text}\n\nYou were explicitly mentioned. Respond to @${member.agent}'s message.`,
+          nextAncestors,
+        )));
+        const gathered = replies.map((reply) => `@${reply.agent} (${reply.role}): ${reply.text}`).join("\n\n");
+        return runThread(
+          member,
+          "team",
+          `The agents you addressed replied:\n\n${gathered}\n\nContinue your response to the owner using their input. Only @mention someone if you need another response from them.`,
+          ancestors,
+        );
+      };
+
+      const finalResult = await runThread(initialMember, runtime.manager, params.message);
+      const conversation = results
+        .filter(Boolean)
+        .map((result) => `@${result.agent} (${result.role}): ${result.text || "(no response)"}`)
+        .join("\n\n");
+      const inputTokens = results.reduce((sum, result) => sum + (result?.inputTokens ?? 0), 0);
+      const outputTokens = results.reduce((sum, result) => sum + (result?.outputTokens ?? 0), 0);
+      const cost = results.reduce((sum, result) => sum + (result?.cost ?? 0), 0);
+      return {
+        content: [{ type: "text", text: conversation || finalResult.text || "(no response)" }],
+        details: { results } satisfies DelegationResult,
+        usage: {
+          input: inputTokens,
+          output: outputTokens,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: inputTokens + outputTokens,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+        },
+      };
     },
 
     renderCall() {
@@ -403,68 +476,69 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     },
 
     renderResult(result, { expanded }, theme) {
-      const details = result.details as Partial<MemberResult> | undefined;
-      const tools = details?.tools ?? [];
-      const member = details?.agent ? byName.get(details.agent.toLowerCase()) : undefined;
+      const details = result.details as Partial<DelegationResult> | undefined;
       const container = new Container();
       let firstTool = true;
 
-      for (const tool of tools) {
-        const key = `${details?.agent ?? "member"}:${tool.id}`;
-        const slot = nestedRenderers.get(key) ?? { state: {} };
-        nestedRenderers.set(key, slot);
-        const definition = member ? toolDefinitions.get(member.agent)?.get(tool.name) : undefined;
-        const partial = tool.status === "running";
-        const contextBase = {
-          args: tool.args,
-          toolCallId: tool.id,
-          invalidate: () => {},
-          state: slot.state,
-          cwd: runtime.working_dir,
-          executionStarted: true,
-          argsComplete: true,
-          isPartial: partial,
-          expanded,
-          showImages: false,
-          isError: Boolean(tool.isError),
-        };
-        const box = new Box(1, 1, (text) => theme.bg(
-          partial ? "toolPendingBg" : tool.isError ? "toolErrorBg" : "toolSuccessBg",
-          text,
-        ));
-        box.addChild(new Text(
-          theme.fg("accent", theme.bold(`@${details?.agent ?? "member"} (${details?.role ?? "Team member"})`)),
-          0,
-          0,
-        ));
+      for (const memberResult of details?.results ?? []) {
+        const member = byName.get(memberResult.agent.toLowerCase());
+        for (const tool of memberResult.tools ?? []) {
+          const key = `${memberResult.agent}:${tool.id}`;
+          const slot = nestedRenderers.get(key) ?? { state: {} };
+          nestedRenderers.set(key, slot);
+          const definition = member ? toolDefinitions.get(member.agent)?.get(tool.name) : undefined;
+          const partial = tool.status === "running";
+          const contextBase = {
+            args: tool.args,
+            toolCallId: tool.id,
+            invalidate: () => {},
+            state: slot.state,
+            cwd: runtime.working_dir,
+            executionStarted: true,
+            argsComplete: true,
+            isPartial: partial,
+            expanded,
+            showImages: false,
+            isError: Boolean(tool.isError),
+          };
+          const box = new Box(1, 1, (text) => theme.bg(
+            partial ? "toolPendingBg" : tool.isError ? "toolErrorBg" : "toolSuccessBg",
+            text,
+          ));
+          box.addChild(new Text(
+            theme.fg("accent", theme.bold(`@${memberResult.agent} (${memberResult.role})`)),
+            0,
+            0,
+          ));
 
-        if (definition?.renderCall) {
-          slot.call = definition.renderCall(tool.args, theme, { ...contextBase, lastComponent: slot.call });
-          box.addChild(slot.call);
-        } else {
-          box.addChild(new Text(`${tool.name} ${JSON.stringify(tool.args)}`, 0, 0));
-        }
-
-        if (tool.result) {
-          if (definition?.renderResult) {
-            slot.result = definition.renderResult(
-              tool.result,
-              { expanded, isPartial: partial },
-              theme,
-              { ...contextBase, lastComponent: slot.result },
-            );
-            box.addChild(slot.result);
+          if (definition?.renderCall) {
+            slot.call = definition.renderCall(tool.args, theme, { ...contextBase, lastComponent: slot.call });
+            box.addChild(slot.call);
           } else {
-            const text = tool.result?.content
-              ?.filter((part: any) => part?.type === "text")
-              .map((part: any) => part.text)
-              .join("\n");
-            if (text) box.addChild(new Text(text, 0, 0));
+            box.addChild(new Text(`${tool.name} ${JSON.stringify(tool.args)}`, 0, 0));
           }
+
+          if (tool.result) {
+            if (definition?.renderResult) {
+              slot.result = definition.renderResult(
+                tool.result,
+                { expanded, isPartial: partial },
+                theme,
+                { ...contextBase, lastComponent: slot.result },
+              );
+              box.addChild(slot.result);
+            } else {
+              const text = tool.result?.content
+                ?.filter((part: any) => part?.type === "text")
+                .map((part: any) => part.text)
+                .join("\n");
+              if (text) box.addChild(new Text(text, 0, 0));
+            }
+          }
+          if (!firstTool) container.addChild(new Spacer(1));
+          container.addChild(box);
+          firstTool = false;
         }
-        if (!firstTool) container.addChild(new Spacer(1));
-        container.addChild(box);
-        firstTool = false;
       }
       return container;
     },
@@ -495,7 +569,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
 
     let instruction: string;
     if (target.toLowerCase() === "team") {
-      instruction = "Consult the relevant members with team_delegate, then synthesize the discussion.";
+      instruction = "You MUST send this message to every other team member with team_delegate, then synthesize the discussion.";
     } else if (member?.agent === runtime.manager) {
       instruction = `The owner directly addressed you, @${runtime.manager}; answer directly unless delegation would materially help.`;
     } else {

@@ -39,7 +39,7 @@ The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, a
 - live member activity
 - delegation budgets to prevent loops
 
-Plain messages go to the manager. Direct mentions are routed through the manager:
+Plain messages go to the manager. Owner mentions are routed through the manager, while mentions emitted by agents are dispatched deterministically by Pipal:
 
 ```text
 @team Evaluate this decision together.
@@ -47,7 +47,7 @@ Plain messages go to the manager. Direct mentions are routed through the manager
 @sasha Give me your own view first.
 ```
 
-Substantial questions can cause the manager to call several members in parallel before synthesizing their views. Member responses are tool results in the manager's native Pi session, so they are visible to the user and available to the manager's model context. If a member asks another member for input, the manager continues the exchange and routes the answer back to the requesting member within the configured delegation budget.
+Substantial questions can cause the manager to call several members in parallel before synthesizing their views. Member responses are tool results in the manager's native Pi session, so they are visible to the user and available to the manager's model context. Pipal parses completed agent messages for known `@agent` mentions, runs every mentioned agent, and returns their replies to the requesting agent so it can continue. `@team` fans out to all other members. This runtime routing is deterministic and bounded by the configured agent-turn budget.
 
 Use `--new-session` to start fresh manager and member native sessions:
 
