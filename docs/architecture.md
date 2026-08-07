@@ -109,6 +109,15 @@ pipal ships three pi extensions (TypeScript):
 
 Extensions are loaded via `--extension` when launching pi.
 
+## Agent communication and delegation
+
+Pipal treats registered agents as persistent communication endpoints. A normal primary-agent chat exposes two paths through the same delegate runtime:
+
+- explicit `@agent:<name>` messages bypass the primary and run the named agent directly;
+- the `pipal_delegate` tool lets the primary own an outcome through repeated messages in a persistent agent-to-agent thread.
+
+Each primary/topic/delegate tuple has an append-only transcript and an independent native Pi session. Both direct messages and delegated turns share cwd handling, event streaming, native-style tool rendering, cancellation, timeouts, and persistence. The primary model is instructed to frame acceptance criteria, inspect work, continue with corrections, validate completion, and report an outcome rather than relay one response. See [delegation.md](delegation.md).
+
 ## Teams
 
 A team is a human-owned group of registered Pipal agents. It reuses topics as the conversation and continuity boundary instead of introducing a separate channel abstraction.

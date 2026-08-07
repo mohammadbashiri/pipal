@@ -26,6 +26,7 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 - topics that persist independently of the working directory
 - native Pi sessions inside topics, with rolling summaries across chats
 - human-owned AI teams with visible multi-agent conversation in Pi's TUI
+- persistent direct agent messaging and outcome-owned delegation
 - optional tasks, a daemon, and a local HTTP/WS server
 
 Built for local, single-user use. One person, one machine. Not a multi-tenant platform. Not hardened for the public internet.
@@ -68,6 +69,14 @@ pipal team create product-team \
 pipal team chat product-team --topic planning
 ```
 
-See [Pipal teams](docs/teams.md) for the multi-agent TUI and current limits.
+Inside a normal agent chat, address another registered agent directly or ask the primary agent to own a delegated outcome:
+
+```text
+@agent:researcher inspect the dependency risks.
+
+Momo, have the researcher investigate this issue, validate the result, and report back when it is resolved.
+```
+
+See [Pipal teams](docs/teams.md) and [persistent delegation](docs/delegation.md).
 
 To learn what else pipal does, use `--help` or ask your agent to check out the repo.

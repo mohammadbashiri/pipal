@@ -1,0 +1,510 @@
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  CustomEditor,
+  createBashToolDefinition,
+  createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
+  createWriteToolDefinition,
+  getMarkdownTheme,
+} from "@earendil-works/pi-coding-agent";
+import { Box, Container, Loader, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
+
+interface DelegateRuntime {
+  agent: string;
+  role: string;
+  agent_path: string;
+  provider?: string;
+  model?: string;
+  prompt_file: string;
+  session_file: string;
+  transcript_file: string;
+}
+
+interface DelegationRuntime {
+  primary: string;
+  primary_path: string;
+  topic: string;
+  working_dir: string;
+  native_pi: string;
+  agent_timeout_seconds?: number;
+  max_turns?: number;
+  delegates: DelegateRuntime[];
+}
+
+interface ToolRun {
+  id: string;
+  name: string;
+  args: any;
+  result?: any;
+  isError?: boolean;
+  status: "running" | "done" | "failed";
+}
+
+interface DelegateResult {
+  agent: string;
+  role: string;
+  model?: string;
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  status: string;
+  tools: ToolRun[];
+}
+
+class CompactLoader extends Loader {
+  override render(width: number): string[] {
+    const lines = super.render(width);
+    return lines[0] === "" ? lines.slice(1) : lines;
+  }
+}
+
+class DelegationEditor extends CustomEditor {
+  constructor(
+    tui: any,
+    theme: any,
+    private delegationKeybindings: any,
+    private knownAgents: Set<string>,
+    private cancelDirect: () => boolean,
+  ) {
+    super(tui, theme, delegationKeybindings);
+  }
+
+  override handleInput(data: string): void {
+    if (
+      this.delegationKeybindings.matches(data, "app.interrupt")
+      && !this.isShowingAutocomplete()
+      && this.cancelDirect()
+    ) return;
+
+    if (this.delegationKeybindings.matches(data, "tui.input.submit") && !this.isShowingAutocomplete()) {
+      const text = this.getExpandedText();
+      const escaped = text.replace(/@agent:([\w.-]+)/g, (value, name) =>
+        this.knownAgents.has(String(name).toLowerCase()) ? `\\${value}` : value);
+      if (escaped !== text) this.setText(escaped);
+    }
+    super.handleInput(data);
+  }
+}
+
+function loadRuntime(): DelegationRuntime | null {
+  const path = process.env.PIPAL_DELEGATION_RUNTIME;
+  if (!path) return null;
+  try {
+    return JSON.parse(fs.readFileSync(path, "utf8")) as DelegationRuntime;
+  } catch {
+    return null;
+  }
+}
+
+function appendEvent(delegate: DelegateRuntime, event: Record<string, unknown>): void {
+  fs.appendFileSync(delegate.transcript_file, `${JSON.stringify({
+    schema_version: 1,
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    ...event,
+  })}\n`, "utf8");
+}
+
+function resultText(result: any): string {
+  return Array.isArray(result?.content)
+    ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n")
+    : "";
+}
+
+function assistantText(message: any): string {
+  return message?.role === "assistant" && Array.isArray(message.content)
+    ? message.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n").trim()
+    : "";
+}
+
+function stripPrefix(text: string, agent: string): string {
+  const escaped = agent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`^@?(?:agent:)?${escaped}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, "i"), "");
+}
+
+function runDelegate(
+  runtime: DelegationRuntime,
+  delegate: DelegateRuntime,
+  from: string,
+  message: string,
+  acceptanceCriteria: string | undefined,
+  signal: AbortSignal | undefined,
+  onProgress: (result: DelegateResult) => void,
+): Promise<DelegateResult> {
+  const task = [
+    `Persistent Pipal delegation message from @agent:${from} in topic ${runtime.topic}.`,
+    `Shared working directory: ${runtime.working_dir}`,
+    "",
+    message,
+    acceptanceCriteria ? `\nAcceptance criteria:\n${acceptanceCriteria}` : "",
+    "",
+    "Perform the work and return concrete results or a precise blocker. This is a continuing thread, so use prior session context when relevant.",
+  ].filter(Boolean).join("\n");
+  const args = [
+    "--mode", "json",
+    "--session", delegate.session_file,
+    "--append-system-prompt", delegate.prompt_file,
+  ];
+  if (delegate.provider) args.push("--provider", delegate.provider);
+  if (delegate.model) args.push("--model", delegate.model);
+  args.push("-p", task);
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(runtime.native_pi, args, {
+      cwd: runtime.working_dir,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PIPAL_AGENT_DIR: delegate.agent_path,
+        PIPAL_TOPIC: runtime.topic,
+        PIPAL_DISABLE_AUTOGREET: "1",
+      },
+    });
+    let buffer = "";
+    let stderr = "";
+    let text = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cost = 0;
+    let status = "thinking";
+    const tools: ToolRun[] = [];
+    const snapshot = (): DelegateResult => ({
+      agent: delegate.agent,
+      role: delegate.role,
+      model: delegate.model,
+      text,
+      inputTokens,
+      outputTokens,
+      cost,
+      status,
+      tools: tools.map((tool) => ({ ...tool })),
+    });
+    const processEvent = (line: string) => {
+      if (!line.trim()) return;
+      let event: any;
+      try { event = JSON.parse(line); } catch { return; }
+      if (event.type === "tool_execution_start") {
+        tools.push({ id: String(event.toolCallId), name: String(event.toolName), args: event.args ?? {}, status: "running" });
+        status = `using ${event.toolName}`;
+        appendEvent(delegate, { type: "tool_call", author: delegate.agent, tool: event.toolName, args: event.args ?? {} });
+        onProgress(snapshot());
+      } else if (event.type === "tool_execution_update") {
+        const tool = tools.find((item) => item.id === String(event.toolCallId));
+        if (tool) tool.result = event.partialResult;
+        onProgress(snapshot());
+      } else if (event.type === "tool_execution_end") {
+        const tool = tools.find((item) => item.id === String(event.toolCallId));
+        if (tool) {
+          tool.result = event.result;
+          tool.isError = Boolean(event.isError);
+          tool.status = event.isError ? "failed" : "done";
+        }
+        appendEvent(delegate, {
+          type: "tool_result",
+          author: delegate.agent,
+          tool: event.toolName,
+          output: resultText(event.result),
+          is_error: Boolean(event.isError),
+        });
+        onProgress(snapshot());
+      } else if (event.type === "message_end" && event.message?.role === "assistant") {
+        const current = assistantText(event.message);
+        if (current) text = stripPrefix(current, delegate.agent);
+        inputTokens += event.message.usage?.input ?? 0;
+        outputTokens += event.message.usage?.output ?? 0;
+        cost += event.message.usage?.cost?.total ?? 0;
+        status = "responding";
+        onProgress(snapshot());
+      }
+    };
+    proc.stdout.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) processEvent(line);
+    });
+    proc.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+
+    let closed = false;
+    let aborted = false;
+    let timedOut = false;
+    const terminate = () => {
+      proc.kill("SIGTERM");
+      setTimeout(() => { if (!closed) proc.kill("SIGKILL"); }, 3000);
+    };
+    const timeoutSeconds = Math.max(1, runtime.agent_timeout_seconds ?? 300);
+    const timeout = setTimeout(() => { timedOut = true; terminate(); }, timeoutSeconds * 1000);
+    proc.on("error", (error) => { closed = true; clearTimeout(timeout); reject(error); });
+    proc.on("close", (code) => {
+      closed = true;
+      clearTimeout(timeout);
+      if (buffer.trim()) processEvent(buffer);
+      if (timedOut) return reject(new Error(`@agent:${delegate.agent} timed out after ${timeoutSeconds}s`));
+      if (aborted) return reject(new Error(`@agent:${delegate.agent} was cancelled`));
+      if ((code ?? 1) !== 0) return reject(new Error(stderr.trim() || `@agent:${delegate.agent} exited with code ${code}`));
+      status = "done";
+      resolve(snapshot());
+    });
+    const abort = () => { aborted = true; terminate(); };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+export default function delegationExtension(pi: ExtensionAPI) {
+  const runtime = loadRuntime();
+  if (!runtime || runtime.delegates.length === 0) return;
+  const byName = new Map(runtime.delegates.map((delegate) => [delegate.agent.toLowerCase(), delegate]));
+  const definitions = new Map(runtime.delegates.map((delegate) => {
+    const tools = [
+      createBashToolDefinition(runtime.working_dir),
+      createReadToolDefinition(runtime.working_dir),
+      createWriteToolDefinition(runtime.working_dir),
+      createEditToolDefinition(runtime.working_dir),
+      createGrepToolDefinition(runtime.working_dir),
+      createFindToolDefinition(runtime.working_dir),
+      createLsToolDefinition(runtime.working_dir),
+    ];
+    return [delegate.agent, new Map(tools.map((tool) => [tool.name, tool]))];
+  }));
+  const renderState = new Map<string, { state: any; call?: any; result?: any }>();
+  const queues = new Map<string, Promise<unknown>>();
+  let callsThisTurn = 0;
+  let directAbort: AbortController | undefined;
+  let directLoader: Loader | undefined;
+
+  const renderTools = (result: DelegateResult, expanded: boolean, theme: any): Container => {
+    const container = new Container();
+    const delegateDefinitions = definitions.get(result.agent);
+    let first = true;
+    for (const tool of result.tools) {
+      const key = `${result.agent}:${tool.id}`;
+      const slot = renderState.get(key) ?? { state: {} };
+      renderState.set(key, slot);
+      const definition = delegateDefinitions?.get(tool.name);
+      const partial = tool.status === "running";
+      const context = {
+        args: tool.args,
+        toolCallId: tool.id,
+        invalidate: () => {},
+        state: slot.state,
+        cwd: runtime.working_dir,
+        executionStarted: true,
+        argsComplete: true,
+        isPartial: partial,
+        expanded,
+        showImages: false,
+        isError: Boolean(tool.isError),
+      };
+      const box = new Box(1, 1, (value) => theme.bg(partial ? "toolPendingBg" : tool.isError ? "toolErrorBg" : "toolSuccessBg", value));
+      box.addChild(new Text(theme.fg("accent", theme.bold(`@agent:${result.agent}`)), 0, 0));
+      if (definition?.renderCall) {
+        slot.call = definition.renderCall(tool.args, theme, { ...context, lastComponent: slot.call });
+        box.addChild(slot.call);
+      } else box.addChild(new Text(`${tool.name} ${JSON.stringify(tool.args)}`, 0, 0));
+      if (tool.result) {
+        if (definition?.renderResult) {
+          slot.result = definition.renderResult(tool.result, { expanded, isPartial: partial }, theme, { ...context, lastComponent: slot.result });
+          box.addChild(slot.result);
+        } else {
+          const output = resultText(tool.result);
+          if (output) box.addChild(new Text(output, 0, 0));
+        }
+      }
+      if (!first) container.addChild(new Spacer(1));
+      container.addChild(box);
+      first = false;
+    }
+    return container;
+  };
+
+  const runQueued = async (
+    delegate: DelegateRuntime,
+    from: string,
+    message: string,
+    acceptance: string | undefined,
+    signal: AbortSignal | undefined,
+    onProgress: (result: DelegateResult) => void,
+  ) => {
+    const previous = queues.get(delegate.agent) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(() =>
+      runDelegate(runtime, delegate, from, message, acceptance, signal, onProgress));
+    queues.set(delegate.agent, operation);
+    return operation;
+  };
+
+  const available = runtime.delegates.map((delegate) => `@agent:${delegate.agent}`).join(", ");
+  pi.registerTool({
+    name: "pipal_delegate",
+    label: "Delegate to Pipal agent",
+    description: `Hold a persistent delegation thread with another registered Pipal agent. Available: ${available}. Use repeated calls to review, correct, and finish delegated work.`,
+    promptSnippet: "Delegate outcome-oriented work to a persistent Pipal agent",
+    promptGuidelines: [
+      "You own every delegated outcome. Frame the goal, context, and acceptance criteria instead of relaying the user's words.",
+      "Inspect the delegate's work. Continue the same agent thread with corrections or follow-up requests until the outcome is complete or genuinely blocked.",
+      "Validate claims and artifacts where practical, then report the completed result rather than merely forwarding the delegate's response.",
+      "Use parallel pipal_delegate calls when independent work can safely happen concurrently.",
+      "Respect user approval boundaries for critical or external actions.",
+    ],
+    parameters: Type.Object({
+      agent: Type.String({ description: "Registered Pipal agent name, without @agent:" }),
+      message: Type.String({ description: "The next clear message in this persistent delegation thread" }),
+      acceptance_criteria: Type.Optional(Type.String({ description: "Concrete conditions for considering this delegated work complete" })),
+    }),
+    renderShell: "self",
+    async execute(_id, params, signal, onUpdate) {
+      const delegate = byName.get(params.agent.replace(/^@?agent:/, "").toLowerCase());
+      if (!delegate) throw new Error(`Unknown Pipal agent ${params.agent}. Available: ${available}`);
+      if (callsThisTurn >= (runtime.max_turns ?? 8)) throw new Error(`Delegation turn budget reached (${runtime.max_turns ?? 8})`);
+      callsThisTurn += 1;
+      appendEvent(delegate, {
+        type: "message",
+        author: runtime.primary,
+        content: params.message,
+        acceptance_criteria: params.acceptance_criteria,
+      });
+      const result = await runQueued(delegate, runtime.primary, params.message, params.acceptance_criteria, signal, (partial) => {
+        onUpdate?.({ content: [{ type: "text", text: partial.text || `@agent:${delegate.agent} is ${partial.status}…` }], details: partial });
+      });
+      appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)" });
+      return {
+        content: [{ type: "text", text: result.text || "(no response)" }],
+        details: result,
+        usage: {
+          input: result.inputTokens,
+          output: result.outputTokens,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: result.inputTokens + result.outputTokens,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.cost },
+        },
+      };
+    },
+    renderCall(args, theme) {
+      return new Text(`${theme.fg("accent", theme.bold(`@agent:${String(args.agent).replace(/^@?agent:/, "")}`))}\n${theme.fg("dim", String(args.message ?? ""))}`, 1, 0);
+    },
+    renderResult(result, { expanded, isPartial }, theme) {
+      const details = result.details as DelegateResult | undefined;
+      if (!details) return new Text("", 0, 0);
+      const container = renderTools(details, expanded, theme);
+      if (details.text || !isPartial) {
+        const response = new Box(1, 1, (value) => theme.bg("toolSuccessBg", value));
+        response.addChild(new Markdown(`**@agent:${details.agent}:** ${details.text || "(no response)"}`, 0, 0, getMarkdownTheme()));
+        if (details.tools.length > 0) container.addChild(new Spacer(1));
+        container.addChild(response);
+      }
+      return container;
+    },
+  });
+
+  pi.registerEntryRenderer("pipal-direct-owner", (entry, _options, _theme) => {
+    const data = entry.data as { text: string; targets: string };
+    return new Markdown(`**Owner → ${data.targets}:**\n\n${data.text}`, 0, 0, getMarkdownTheme());
+  });
+  pi.registerEntryRenderer("pipal-direct-tools", (entry, { expanded }, theme) =>
+    renderTools((entry.data as { result: DelegateResult }).result, expanded, theme));
+  pi.registerEntryRenderer("pipal-direct-reply", (entry, _options, _theme) => {
+    const data = entry.data as { agent: string; text: string };
+    return new Markdown(`**@agent:${data.agent}:** ${data.text}`, 0, 0, getMarkdownTheme());
+  });
+  pi.registerEntryRenderer("pipal-direct-error", (entry, _options, theme) =>
+    new Text(theme.fg("error", `Delegation error: ${(entry.data as { text: string }).text}`), 0, 0));
+
+  pi.on("input", async (event, ctx) => {
+    callsThisTurn = 0;
+    const text = event.text.replace(/\\@agent:/g, "@agent:");
+    const names = [...text.matchAll(/@agent:([\w.-]+)/g)].map((match) => match[1].toLowerCase());
+    const targets = [...new Set(names)].map((name) => byName.get(name)).filter(Boolean) as DelegateRuntime[];
+    if (targets.length === 0) return { action: "continue" };
+
+    pi.appendEntry("pipal-direct-owner", { text, targets: targets.map((target) => `@agent:${target.agent}`).join(", ") });
+    directAbort?.abort();
+    const controller = new AbortController();
+    directAbort = controller;
+    ctx.ui.setWidget("pipal-direct-spinner", (tui, theme) => {
+      directLoader = new CompactLoader(tui, (value) => theme.fg("accent", value), (value) => theme.fg("muted", value), `Working · ${targets.map((target) => `@agent:${target.agent}`).join(", ")}`);
+      return directLoader;
+    });
+    try {
+      await Promise.all(targets.map(async (delegate) => {
+        appendEvent(delegate, { type: "message", author: "owner", content: text });
+        let latest: DelegateResult | undefined;
+        const result = await runQueued(delegate, "owner", text, undefined, controller.signal, (partial) => {
+          latest = partial;
+          if (partial.tools.length > 0) {
+            directLoader?.stop();
+            directLoader = undefined;
+            ctx.ui.setWidget("pipal-direct-spinner", undefined);
+            ctx.ui.setWidget(`pipal-direct-live-${delegate.agent}`, (_tui: any, theme: any) => renderTools(latest!, true, theme));
+          }
+        });
+        ctx.ui.setWidget(`pipal-direct-live-${delegate.agent}`, undefined);
+        if (result.tools.length > 0) pi.appendEntry("pipal-direct-tools", { result });
+        appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)" });
+        pi.appendEntry("pipal-direct-reply", { agent: delegate.agent, text: result.text || "(no response)" });
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pi.appendEntry("pipal-direct-error", { text: message });
+      ctx.ui.notify(message, controller.signal.aborted ? "warning" : "error");
+    } finally {
+      if (directAbort === controller) directAbort = undefined;
+      directLoader?.stop();
+      directLoader = undefined;
+      ctx.ui.setWidget("pipal-direct-spinner", undefined);
+      for (const target of targets) ctx.ui.setWidget(`pipal-direct-live-${target.agent}`, undefined);
+    }
+    return { action: "handled" };
+  });
+
+  pi.on("session_start", (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
+    const names = new Set(runtime.delegates.map((delegate) => delegate.agent.toLowerCase()));
+    ctx.ui.setEditorComponent((tui, theme, keybindings) => new DelegationEditor(
+      tui,
+      theme,
+      keybindings,
+      names,
+      () => {
+        if (!directAbort) return false;
+        directAbort.abort();
+        ctx.ui.notify("Cancelling direct agent work", "warning");
+        return true;
+      },
+    ));
+    ctx.ui.addAutocompleteProvider((current) => ({
+      triggerCharacters: ["@"],
+      async getSuggestions(lines, line, col, options) {
+        const before = (lines[line] ?? "").slice(0, col);
+        const match = before.match(/(?:^|\s)@agent:([\w.-]*)$/);
+        if (!match) return current.getSuggestions(lines, line, col, options);
+        const query = match[1].toLowerCase();
+        const items = runtime.delegates
+          .filter((delegate) => delegate.agent.toLowerCase().includes(query))
+          .map((delegate) => ({ value: `@agent:${delegate.agent}`, label: `@agent:${delegate.agent}`, description: delegate.model ?? "Pipal agent" }));
+        if (options.signal.aborted || items.length === 0) return null;
+        return { prefix: `@agent:${match[1]}`, items };
+      },
+      applyCompletion(lines, line, col, item, prefix) {
+        return current.applyCompletion(lines, line, col, item, prefix);
+      },
+      shouldTriggerFileCompletion(lines, line, col) {
+        return current.shouldTriggerFileCompletion?.(lines, line, col) ?? true;
+      },
+    }));
+  });
+
+  pi.on("session_shutdown", () => {
+    directAbort?.abort();
+    directLoader?.stop();
+  });
+}

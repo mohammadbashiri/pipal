@@ -112,7 +112,9 @@ Topics live under topics/<name>/. Each topic has a rolling summary.md and contai
 
 Current topic: {topic_name}
 
-For questions about prior context ("what did we do last time", etc.), read topics/{topic_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home."""
+For questions about prior context ("what did we do last time", etc.), read topics/{topic_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home.
+
+Persistent direct/delegation threads with other registered Pipal agents live under topics/{topic_name}/delegations/<agent>/. Use the `pipal_delegate` tool to hold a multi-turn thread and own the delegated outcome; do not act as a one-shot relay."""
 
 
 def build_pipal_context(agent: Path, topic_name: str) -> str:
@@ -166,6 +168,7 @@ def _extract_topic_name(args: list[str]) -> tuple[str, list[str]]:
 DEFAULT_EXTENSIONS = [
     Path(__file__).resolve().parent / "extensions" / "rolling_summary.ts",
     Path(__file__).resolve().parent / "extensions" / "auto_greet.ts",
+    Path(__file__).resolve().parent / "extensions" / "delegation.ts",
 ]
 
 
@@ -297,6 +300,17 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
         else:
             system_prompt = persona
 
+    os.environ.pop("PIPAL_DELEGATION_RUNTIME", None)
+    if agent_type != "kbchat" and not heartbeat_only and not routine_only:
+        from .delegation_runtime import build_delegation_runtime
+
+        _runtime, delegation_runtime_file = build_delegation_runtime(
+            primary_name=agent.name,
+            primary_path=agent_path,
+            topic_name=topic_name,
+        )
+        os.environ["PIPAL_DELEGATION_RUNTIME"] = str(delegation_runtime_file.resolve())
+
     _run_agent_cmd(
         agent_path=agent_path,
         llm_config=llm_config,
@@ -340,6 +354,16 @@ def run_agent_print(
     )
 
     env = os.environ.copy()
+    env.pop("PIPAL_DELEGATION_RUNTIME", None)
+    if agent_type != "kbchat":
+        from .delegation_runtime import build_delegation_runtime
+
+        _runtime, delegation_runtime_file = build_delegation_runtime(
+            primary_name=agent.name,
+            primary_path=agent_path,
+            topic_name=topic_name,
+        )
+        env["PIPAL_DELEGATION_RUNTIME"] = str(delegation_runtime_file.resolve())
     env["PIPAL_AGENT_DIR"] = str(agent.resolve())
     env["PIPAL_TOPIC"] = topic_name
     env["PIPAL_DISABLE_AUTOGREET"] = "1"
