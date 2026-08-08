@@ -47,6 +47,14 @@ interface DelegationRuntime {
   teams?: TeamRuntime[];
 }
 
+type ReportKind = "brief" | "review" | "audit";
+
+const reportLabels: Record<ReportKind, string> = {
+  brief: "Executive Summary",
+  review: "Decision Review",
+  audit: "Audit Report",
+};
+
 interface ToolRun {
   id: string;
   name: string;
@@ -366,7 +374,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
   let directAbort: AbortController | undefined;
   let directLoader: Loader | undefined;
   let backgroundPoller: NodeJS.Timeout | undefined;
-  const pendingAudits = new Set<string>();
+  const pendingReports = new Set<string>();
   let watchedDelegation: string | undefined;
   let joinedDelegation: string | undefined;
   const watchedOffsets = new Map<string, number>();
@@ -625,9 +633,12 @@ export default function delegationExtension(pi: ExtensionAPI) {
     new Text(theme.fg("error", `Delegation error: ${(entry.data as { text: string }).text}`), 0, 0));
   pi.registerMessageRenderer("pipal-delegation-complete", (message, _options, theme) =>
     new Text(theme.fg("accent", `Delegation ready for primary review: ${(message.details as any)?.delegation_id ?? ""}`), 0, 0));
-  pi.registerMessageRenderer("pipal-audit-request", (message, _options, theme) =>
-    new Text(theme.fg("accent", `Preparing delegation audit: ${(message.details as any)?.delegation_id ?? ""}`), 0, 0));
-  pi.registerEntryRenderer("pipal-audit-report", (entry, _options, _theme) => {
+  pi.registerMessageRenderer("pipal-report-request", (message, _options, theme) => {
+    const details = message.details as { delegation_id?: string; report_kind?: ReportKind };
+    const label = details.report_kind ? reportLabels[details.report_kind] : "Delegation report";
+    return new Text(theme.fg("accent", `Preparing ${label}: ${details.delegation_id ?? ""}`), 0, 0);
+  });
+  pi.registerEntryRenderer("pipal-delegation-report", (entry, _options, _theme) => {
     const data = entry.data as { markdown: string };
     return new Markdown(data.markdown, 0, 0, getMarkdownTheme());
   });
@@ -663,16 +674,21 @@ export default function delegationExtension(pi: ExtensionAPI) {
   const jobsForDelegation = (id: string): any[] =>
     readBackgroundJobs().filter((job) => job.id === id || job.delegation_id === id);
   const validDelegationId = (id: string): boolean => /^dg-[a-zA-Z0-9_-]+$/.test(id);
-  const auditDirectory = (id: string): string => `${runtime.background_root}/audits/${id}`;
-  const loadAudit = (id: string): { markdown: string; json: any } | undefined => {
+  const reportDirectory = (id: string): string => `${runtime.background_root}/reports/${id}`;
+  const legacyAuditDirectory = (id: string): string => `${runtime.background_root}/audits/${id}`;
+  const loadReport = (id: string, kind: ReportKind): { markdown: string; json: any } | undefined => {
     if (!runtime.background_root || !validDelegationId(id)) return undefined;
-    const directory = auditDirectory(id);
-    try {
-      return {
-        markdown: fs.readFileSync(`${directory}/audit.md`, "utf8"),
-        json: JSON.parse(fs.readFileSync(`${directory}/audit.json`, "utf8")),
-      };
-    } catch { return undefined; }
+    const directories = [reportDirectory(id)];
+    if (kind === "audit") directories.push(legacyAuditDirectory(id));
+    for (const directory of directories) {
+      try {
+        return {
+          markdown: fs.readFileSync(`${directory}/${kind}.md`, "utf8"),
+          json: JSON.parse(fs.readFileSync(`${directory}/${kind}.json`, "utf8")),
+        };
+      } catch { /* try legacy location */ }
+    }
+    return undefined;
   };
 
   const reportWatchedEvents = () => {
@@ -753,17 +769,19 @@ export default function delegationExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "pipal_save_audit",
-    label: "Save delegation audit",
-    description: "Persist the primary agent's evidence-linked audit for a completed delegation. Use only after inspecting every participant result with pipal_delegation_status.",
-    promptSnippet: "Save a structured, durable delegation audit",
+    name: "pipal_save_report",
+    label: "Save delegation report",
+    description: "Persist an executive brief, decision review, or audit for a completed delegation after inspecting all participant results.",
+    promptSnippet: "Save a durable delegation report",
     parameters: Type.Object({
+      report_kind: Type.Union([Type.Literal("brief"), Type.Literal("review"), Type.Literal("audit")]),
       delegation_id: Type.String({ description: "Completed delegation id" }),
       decision: Type.String({ description: "Final decision or outcome" }),
       confidence: Type.Optional(Type.String({ description: "Calibrated confidence such as high, medium, or low" })),
-      report_markdown: Type.String({ description: "Complete audit report in the required structured format" }),
+      report_markdown: Type.String({ description: "Complete report in the requested contract" }),
     }),
     async execute(_id, params) {
+      const kind = params.report_kind as ReportKind;
       const delegationId = params.delegation_id.trim();
       if (!validDelegationId(delegationId)) throw new Error(`Invalid delegation id ${delegationId}`);
       const jobs = jobsForDelegation(delegationId);
@@ -771,7 +789,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       if (!jobs.every((job) => ["completed", "failed", "cancelled"].includes(job.status))) {
         throw new Error(`Delegation ${delegationId} is still active`);
       }
-      const directory = auditDirectory(delegationId);
+      const directory = reportDirectory(delegationId);
       fs.mkdirSync(directory, { recursive: true });
       const sources = jobs.map((job) => ({
         job_id: job.id,
@@ -787,6 +805,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       }));
       const record = {
         schema_version: 1,
+        report_kind: kind,
         delegation_id: delegationId,
         generated_at: new Date().toISOString(),
         primary: runtime.primary,
@@ -796,20 +815,21 @@ export default function delegationExtension(pi: ExtensionAPI) {
         report_sha256: createHash("sha256").update(params.report_markdown).digest("hex"),
         sources,
       };
-      fs.writeFileSync(`${directory}/audit.md`, params.report_markdown.endsWith("\n") ? params.report_markdown : `${params.report_markdown}\n`, "utf8");
-      fs.writeFileSync(`${directory}/audit.json`, `${JSON.stringify(record, null, 2)}\n`, "utf8");
-      pendingAudits.delete(delegationId);
+      fs.writeFileSync(`${directory}/${kind}.md`, params.report_markdown.endsWith("\n") ? params.report_markdown : `${params.report_markdown}\n`, "utf8");
+      fs.writeFileSync(`${directory}/${kind}.json`, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+      pendingReports.delete(`${kind}:${delegationId}`);
       return {
-        content: [{ type: "text", text: `Saved audit for ${delegationId} to ${directory}` }],
-        details: { delegation_id: delegationId, directory, decision: params.decision },
+        content: [{ type: "text", text: `Saved ${reportLabels[kind]} for ${delegationId} to ${directory}` }],
+        details: { report_kind: kind, delegation_id: delegationId, directory, decision: params.decision },
       };
     },
     renderCall(args, theme) {
-      return new Text(theme.fg("accent", `Audit ${args.delegation_id} · ${args.decision}`), 1, 0);
+      const kind = String(args.report_kind) as ReportKind;
+      return new Text(theme.fg("accent", `${reportLabels[kind] ?? "Report"} ${args.delegation_id} · ${args.decision}`), 1, 0);
     },
     renderResult(result, _options, theme) {
       const details = result.details as any;
-      return new Text(theme.fg("success", `✓ Durable audit saved · ${details?.delegation_id ?? ""}`), 1, 0);
+      return new Text(theme.fg("success", `✓ ${reportLabels[details?.report_kind as ReportKind] ?? "Report"} saved · ${details?.delegation_id ?? ""}`), 1, 0);
     },
   });
 
@@ -831,48 +851,79 @@ export default function delegationExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("audit", {
-    description: "Open or create a durable delegation audit: /audit <dg-id> [--refresh]",
-    handler: async (args, ctx) => {
-      const parts = args.trim().split(/\s+/).filter(Boolean);
-      const delegationId = parts.find((part) => part !== "--refresh") ?? "";
-      const refresh = parts.includes("--refresh");
-      if (!validDelegationId(delegationId)) return ctx.ui.notify("Usage: /audit <dg-id> [--refresh]", "warning");
-      const existing = loadAudit(delegationId);
-      if (existing && !refresh) {
-        pi.appendEntry("pipal-audit-report", { delegation_id: delegationId, markdown: existing.markdown });
-        return ctx.ui.notify(`Opened saved audit for ${delegationId}`, "info");
-      }
-      const jobs = jobsForDelegation(delegationId);
-      if (jobs.length === 0) return ctx.ui.notify(`Unknown durable delegation ${delegationId}`, "error");
-      if (!jobs.every((job) => ["completed", "failed", "cancelled"].includes(job.status))) {
-        return ctx.ui.notify(`${delegationId} is still active; audit it after completion`, "warning");
-      }
-      if (pendingAudits.has(delegationId)) return ctx.ui.notify(`Audit ${delegationId} is already being prepared`, "info");
-      pendingAudits.add(delegationId);
-      pi.sendMessage({
-        customType: "pipal-audit-request",
-        content: `Create a rigorous durable audit for completed delegation ${delegationId}.
+  const reportContracts: Record<ReportKind, string> = {
+    brief: `Produce a concise Executive Summary, ideally one screen:
+1. Decision or completed outcome
+2. Key evidence
+3. Material uncertainties or blockers
+4. Next actions
 
-First call pipal_delegation_status with job_id ${delegationId} and inspect every participant's exact result, failure, goal, and acceptance criteria. Consult your own session history for follow-up checks you actually performed. Do not claim independent verification unless it appears in your tool/session evidence.
+Prioritize clarity and consequence. Do not include exhaustive participant-by-participant detail unless it is necessary to understand the decision.`,
+    review: `Produce a Decision Review:
+1. Original assignment and acceptance criteria
+2. Each participant's contribution separately, including their exact conclusion
+3. Claim provenance: which material final claims came from which participant or primary verification
+4. The primary manager's treatment: accepted, modified, rejected, or omitted findings, with reasons
+5. Disagreements and how they were resolved or preserved
+6. Decision derivation: distinguish evidence from the manager's judgment
+7. Final decision/outcome, material uncertainties, and next actions
 
-Produce this report contract:
+Quote delegate conclusions exactly. Make attribution clear without reproducing every low-level tool event.`,
+    audit: `Produce a rigorous Audit Report:
 1. Original assignment and acceptance criteria
 2. Participants, status, and exact conclusion from each delegate
 3. Each delegate's evidence, blockers, and uncertainties
 4. Claim-to-source map for every material final claim
-5. Your treatment of findings: accepted, modified, rejected, or omitted, with concise reasons
+5. The primary manager's treatment: accepted, modified, rejected, or omitted findings, with concise reasons
 6. Corrections and follow-up rounds
-7. Decision derivation: evidence versus your judgment
+7. Decision derivation: evidence versus the manager's judgment
 8. Final decision/outcome, calibrated confidence, unresolved uncertainties, and next actions
 
-Preserve disagreement and distinguish agent claims from verified facts. Reference participant/job identities. Then call pipal_save_audit with delegation_id ${delegationId}, the decision, confidence, and the complete Markdown report. After saving, present the report to the owner.`,
-        display: true,
-        details: { delegation_id: delegationId, refresh },
-      }, { triggerTurn: true, deliverAs: "followUp" });
-      ctx.ui.notify(`Preparing audit for ${delegationId}`, "info");
-    },
-  });
+Preserve disagreement, distinguish agent claims from verified facts, and reference participant/job identities.`,
+  };
+
+  const registerReportCommand = (command: ReportKind) => {
+    const label = reportLabels[command];
+    pi.registerCommand(command, {
+      description: `Open or create a durable ${label}: /${command} <dg-id> [--refresh]`,
+      handler: async (args, ctx) => {
+        const parts = args.trim().split(/\s+/).filter(Boolean);
+        const delegationId = parts.find((part) => part !== "--refresh") ?? "";
+        const refresh = parts.includes("--refresh");
+        if (!validDelegationId(delegationId)) return ctx.ui.notify(`Usage: /${command} <dg-id> [--refresh]`, "warning");
+        const existing = loadReport(delegationId, command);
+        if (existing && !refresh) {
+          pi.appendEntry("pipal-delegation-report", { report_kind: command, delegation_id: delegationId, markdown: existing.markdown });
+          return ctx.ui.notify(`Opened saved ${label} for ${delegationId}`, "info");
+        }
+        const jobs = jobsForDelegation(delegationId);
+        if (jobs.length === 0) return ctx.ui.notify(`Unknown durable delegation ${delegationId}`, "error");
+        if (!jobs.every((job) => ["completed", "failed", "cancelled"].includes(job.status))) {
+          return ctx.ui.notify(`${delegationId} is still active; create the ${label} after completion`, "warning");
+        }
+        const pendingKey = `${command}:${delegationId}`;
+        if (pendingReports.has(pendingKey)) return ctx.ui.notify(`${label} for ${delegationId} is already being prepared`, "info");
+        pendingReports.add(pendingKey);
+        pi.sendMessage({
+          customType: "pipal-report-request",
+          content: `Create a durable ${label} for completed delegation ${delegationId}.
+
+First call pipal_delegation_status with job_id ${delegationId} and inspect every participant's exact result, failure, goal, and acceptance criteria. Consult your own session history for follow-up checks you actually performed. Never claim independent verification unless the corresponding tool/session evidence exists.
+
+${reportContracts[command]}
+
+Then call pipal_save_report with report_kind ${command}, delegation_id ${delegationId}, the decision/outcome, calibrated confidence when appropriate, and the complete Markdown report. After saving, present the report to the owner.`,
+          display: true,
+          details: { report_kind: command, delegation_id: delegationId, refresh },
+        }, { triggerTurn: true, deliverAs: "followUp" });
+        ctx.ui.notify(`Preparing ${label} for ${delegationId}`, "info");
+      },
+    });
+  };
+
+  registerReportCommand("brief");
+  registerReportCommand("review");
+  registerReportCommand("audit");
 
   pi.registerCommand("cancel-delegation", {
     description: "Cancel background delegated work: /cancel-delegation <dg-id>",

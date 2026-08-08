@@ -63,25 +63,31 @@ Visibility is independent from execution:
 
 An intervention sent while an isolated background turn is already running is treated as a persistent follow-up rather than mutating that in-flight model call.
 
-## Durable audits
+## Durable delegation reports
 
-After a delegation finishes, create or reopen an evidence-linked audit:
+Pipal provides three disclosure levels after a delegation finishes:
+
+| Command | Report | Contract |
+|---|---|---|
+| `/brief <dg-id>` | Executive Summary | Decision, key evidence, material uncertainty, next actions |
+| `/review <dg-id>` | Decision Review | Individual contributions, exact conclusions, provenance, manager treatment, disagreements, decision derivation |
+| `/audit <dg-id>` | Audit Report | Complete evidence, source mapping, corrections, judgment trail, confidence, and unresolved uncertainty |
+
+Each command validates the delegation and loads every participant result. The accountable primary agent must distinguish participant claims from verified facts and cannot claim independent verification unless its session contains the corresponding evidence.
+
+Pipal saves the readable Markdown and a machine-readable record with source snapshots and SHA-256 hashes:
 
 ```text
-/audit dg-fb591445
-```
-
-The command validates the delegation, loads every participant result, and asks the accountable primary agent to produce a fixed report contract: original assignment, exact delegate conclusions, evidence and uncertainties, claim-to-source mapping, accepted/modified/rejected/omitted findings, correction rounds, decision derivation, final outcome, confidence, and next actions. The primary must not claim independent verification unless its session contains the corresponding evidence.
-
-Pipal saves both the readable report and a machine-readable provenance record containing immutable source snapshots and SHA-256 hashes:
-
-```text
-delegations/jobs/audits/<dg-id>/
+delegations/jobs/reports/<dg-id>/
+  brief.md
+  brief.json
+  review.md
+  review.json
   audit.md
   audit.json
 ```
 
-Running `/audit <dg-id>` again opens the saved report without another model call. Use `/audit <dg-id> --refresh` to deliberately regenerate it from current durable records.
+Running a report command again opens the saved version without another model call. Add `--refresh` to deliberately regenerate that report from current durable records. Existing audits in the legacy `jobs/audits/` location remain readable.
 
 ## Storage
 
@@ -93,9 +99,10 @@ Running `/audit <dg-id>` again opens the saved report without another model call
     job.json
     events.jsonl
     session.jsonl
-  jobs/audits/<dg-id>/
-    audit.md
-    audit.json
+  jobs/reports/<dg-id>/
+    brief.md / brief.json
+    review.md / review.json
+    audit.md / audit.json
   <delegate>/
     transcript.jsonl
     sessions/*.jsonl
@@ -111,5 +118,5 @@ The transcript is the durable direct/delegation thread. The delegate's native Pi
 - Repeated delegation calls are bounded per primary turn.
 - `/delegations` lists durable background jobs and groups team members under one delegation id.
 - `/cancel-delegation <dg-id>` terminates all active workers in that delegation.
-- `/audit <dg-id>` creates or opens a durable evidence-linked decision audit; `--refresh` regenerates it.
+- `/brief`, `/review`, and `/audit` create or open durable reports at increasing levels of detail; `--refresh` regenerates one.
 - `/watch`, `/join`, and `/detach` control visibility without changing execution.

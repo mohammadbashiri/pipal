@@ -78,7 +78,7 @@ Momo, have the researcher investigate this issue, validate the result, and repor
 Have product-team evaluate this in parallel and give me one synthesis.
 ```
 
-Use `/watch <dg-id>`, `/join <dg-id>`, and `/detach` to control visibility of background work. `/audit <dg-id>` produces a durable evidence-linked report showing participant findings, provenance, the primary agent's treatment of disagreements, and decision derivation. Dedicated visible rooms remain available with `pipal team chat product-team --topic planning`.
+Use `/watch <dg-id>`, `/join <dg-id>`, and `/detach` to control visibility of background work. `/brief <dg-id>`, `/review <dg-id>`, and `/audit <dg-id>` provide durable executive, attributed decision-review, and full evidence-trace reports. Dedicated visible rooms remain available with `pipal team chat product-team --topic planning`.
 
 See [Pipal teams](docs/teams.md) and [persistent delegation](docs/delegation.md).
 
