@@ -63,6 +63,26 @@ Visibility is independent from execution:
 
 An intervention sent while an isolated background turn is already running is treated as a persistent follow-up rather than mutating that in-flight model call.
 
+## Durable audits
+
+After a delegation finishes, create or reopen an evidence-linked audit:
+
+```text
+/audit dg-fb591445
+```
+
+The command validates the delegation, loads every participant result, and asks the accountable primary agent to produce a fixed report contract: original assignment, exact delegate conclusions, evidence and uncertainties, claim-to-source mapping, accepted/modified/rejected/omitted findings, correction rounds, decision derivation, final outcome, confidence, and next actions. The primary must not claim independent verification unless its session contains the corresponding evidence.
+
+Pipal saves both the readable report and a machine-readable provenance record containing immutable source snapshots and SHA-256 hashes:
+
+```text
+delegations/jobs/audits/<dg-id>/
+  audit.md
+  audit.json
+```
+
+Running `/audit <dg-id>` again opens the saved report without another model call. Use `/audit <dg-id> --refresh` to deliberately regenerate it from current durable records.
+
 ## Storage
 
 ```text
@@ -71,7 +91,11 @@ An intervention sent while an isolated background turn is already running is tre
   runtime-prompts/
   jobs/<dg-id>/
     job.json
+    events.jsonl
     session.jsonl
+  jobs/audits/<dg-id>/
+    audit.md
+    audit.json
   <delegate>/
     transcript.jsonl
     sessions/*.jsonl
@@ -87,4 +111,5 @@ The transcript is the durable direct/delegation thread. The delegate's native Pi
 - Repeated delegation calls are bounded per primary turn.
 - `/delegations` lists durable background jobs and groups team members under one delegation id.
 - `/cancel-delegation <dg-id>` terminates all active workers in that delegation.
+- `/audit <dg-id>` creates or opens a durable evidence-linked decision audit; `--refresh` regenerates it.
 - `/watch`, `/join`, and `/detach` control visibility without changing execution.
