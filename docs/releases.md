@@ -6,13 +6,14 @@
 
 ### Support policy
 
-- Minimum supported `pi-coding-agent` version: `0.74.0`
-- CI-tested targets: pinned `0.74.0` and `latest`
+- Minimum supported `pi-coding-agent` version: `0.84.1`
+- CI-tested targets: pinned `0.84.1` and `latest`
+- Pipal follows Pi's current extension APIs rather than maintaining deep compatibility shims for older Pi releases.
 
 | pipal version | minimum supported pi version | CI-tested pi versions | notes |
 |---|---|---|
 | 0.1.0 | 0.66.1 | 0.66.1, latest | baseline compatibility checks in CI |
-| unreleased (`main`, 0.2.0 candidate) | 0.74.0 | 0.74.0, latest | topics replace Pipal sessions; validate before tagging |
+| unreleased (`main`, 0.2.0 candidate) | 0.84.1 | 0.84.1, latest | requires modern extension entry rendering used by teams and delegation; validate before tagging |
 
 When a pipal release is cut, update this table with the exact pipal tag and the tested `pi` version(s).
 

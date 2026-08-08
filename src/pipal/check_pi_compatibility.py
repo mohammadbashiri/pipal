@@ -30,7 +30,7 @@ REQUIRED_FLAGS = [
     "--resume",
     "--tools",
 ]
-MIN_PI_VERSION = "0.74.0"
+MIN_PI_VERSION = "0.84.1"
 
 REMEDIATION = {
     "pi binary": [
@@ -40,7 +40,8 @@ REMEDIATION = {
         "Run `pi --version` directly and fix your pi installation/provider setup.",
     ],
     "pi version supported": [
-        f"Upgrade pi-coding-agent to at least {MIN_PI_VERSION}.",
+        f"Pipal 0.2.0 requires pi-coding-agent >= {MIN_PI_VERSION}.",
+        "Upgrade with: `npm install -g @earendil-works/pi-coding-agent@latest`",
         "Then rerun: `pipal check-pi-compatibility`",
     ],
     "pi --help": [

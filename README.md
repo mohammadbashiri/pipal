@@ -41,7 +41,7 @@ If Pi breaks, pipal breaks. If Pi changes behavior, pipal follows. That's the de
 
 ## Installation
 
-Requires the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) and [uv](https://docs.astral.sh/uv/).
+Requires [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) **0.84.1 or newer** and [uv](https://docs.astral.sh/uv/). Pipal follows Pi's current extension APIs rather than emulating them for older releases.
 
 ```bash
 git clone https://github.com/mohammadbashiri/pipal
