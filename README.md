@@ -59,23 +59,26 @@ pipal agent create momo
 pipal agent chat momo
 ```
 
-Create a team from registered agents and open a shared topic:
+Create a saved team from registered agents:
 
 ```bash
 pipal team create product-team \
   --manager momo \
   --member researcher:Researcher \
   --member reviewer:Reviewer
-pipal team chat product-team --topic planning
 ```
 
-Inside a normal agent chat, address another registered agent directly or ask the primary agent to own a delegated outcome:
+Normal primary-agent chat is the default entrance. Address an agent directly, delegate an owned outcome, or use the saved team:
 
 ```text
 @agent:researcher inspect the dependency risks.
 
 Momo, have the researcher investigate this issue, validate the result, and report back when it is resolved.
+
+Have product-team evaluate this in parallel and give me one synthesis.
 ```
+
+Use `/watch <dg-id>`, `/join <dg-id>`, and `/detach` to control visibility of background work. Dedicated visible rooms remain available with `pipal team chat product-team --topic planning`.
 
 See [Pipal teams](docs/teams.md) and [persistent delegation](docs/delegation.md).
 

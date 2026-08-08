@@ -8,7 +8,7 @@ from .conversation_runtime import session_for_cwd
 from .llm_config import load_llm_config
 from .registry import list_agents
 from .runner import _find_native_pi, load_persona
-from .team_storage import latest_jsonl
+from .team_storage import latest_jsonl, list_teams
 
 
 DELEGATION_EXTENSION = Path(__file__).resolve().parent / "extensions" / "delegation.ts"
@@ -100,8 +100,22 @@ def build_delegation_runtime(
             }
         )
 
+    available = {item["agent"] for item in delegates}
+    teams: list[dict] = []
+    for team in list_teams():
+        members = [
+            member for member in team.get("members", [])
+            if member.get("agent") == primary_name or member.get("agent") in available
+        ]
+        if members:
+            teams.append({
+                "name": team.get("name"),
+                "manager": team.get("manager"),
+                "members": members,
+            })
+
     runtime = {
-        "schema_version": 1,
+        "schema_version": 2,
         "primary": primary_name,
         "primary_path": str(primary_home),
         "topic": topic_name,
@@ -112,6 +126,7 @@ def build_delegation_runtime(
         "background_root": str((root / "jobs").resolve()),
         "worker_python": sys.executable,
         "delegates": delegates,
+        "teams": teams,
     }
     runtime_file = root / "runtime.json"
     runtime_file.write_text(json.dumps(runtime, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

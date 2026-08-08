@@ -27,6 +27,12 @@ interface DelegateRuntime {
   transcript_file: string;
 }
 
+interface TeamRuntime {
+  name: string;
+  manager?: string;
+  members: Array<{ agent: string; role?: string }>;
+}
+
 interface DelegationRuntime {
   primary: string;
   primary_path: string;
@@ -38,6 +44,7 @@ interface DelegationRuntime {
   background_root?: string;
   worker_python?: string;
   delegates: DelegateRuntime[];
+  teams?: TeamRuntime[];
 }
 
 interface ToolRun {
@@ -58,6 +65,7 @@ interface BackgroundResult {
 
 interface DelegateResult {
   agent: string;
+  delegationId?: string;
   role: string;
   model?: string;
   text: string;
@@ -66,6 +74,14 @@ interface DelegateResult {
   cost: number;
   status: string;
   tools: ToolRun[];
+}
+
+interface TeamDelegateResult {
+  team: string;
+  delegation_id: string;
+  background: boolean;
+  results: DelegateResult[];
+  jobs?: BackgroundResult[];
 }
 
 class CompactLoader extends Loader {
@@ -81,6 +97,7 @@ class DelegationEditor extends CustomEditor {
     theme: any,
     private delegationKeybindings: any,
     private knownAgents: Set<string>,
+    private knownTeams: Set<string>,
     private cancelDirect: () => boolean,
   ) {
     super(tui, theme, delegationKeybindings);
@@ -95,8 +112,10 @@ class DelegationEditor extends CustomEditor {
 
     if (this.delegationKeybindings.matches(data, "tui.input.submit") && !this.isShowingAutocomplete()) {
       const text = this.getExpandedText();
-      const escaped = text.replace(/@agent:([\w.-]+)/g, (value, name) =>
+      let escaped = text.replace(/@agent:([\w.-]+)/g, (value, name) =>
         this.knownAgents.has(String(name).toLowerCase()) ? `\\${value}` : value);
+      escaped = escaped.replace(/@team(?::([\w.-]+))?/g, (value, name) =>
+        !name || this.knownTeams.has(String(name).toLowerCase()) ? `\\${value}` : value);
       if (escaped !== text) this.setText(escaped);
     }
     super.handleInput(data);
@@ -144,11 +163,13 @@ function startBackgroundJob(
   delegate: DelegateRuntime,
   message: string,
   acceptanceCriteria?: string,
+  options?: { delegationId?: string; team?: string },
 ): BackgroundResult {
   if (!runtime.background_root || !runtime.worker_python) {
     throw new Error("Background delegation is unavailable in this runtime");
   }
   const jobId = `dg-${randomUUID().slice(0, 8)}`;
+  const delegationId = options?.delegationId ?? jobId;
   const jobDir = `${runtime.background_root}/${jobId}`;
   fs.mkdirSync(jobDir, { recursive: true });
   const sessionFile = `${jobDir}/session.jsonl`;
@@ -168,6 +189,8 @@ function startBackgroundJob(
   fs.writeFileSync(jobFile, `${JSON.stringify({
     schema_version: 1,
     id: jobId,
+    delegation_id: delegationId,
+    team: options?.team,
     status: "queued",
     created_at: new Date().toISOString(),
     primary: runtime.primary,
@@ -188,7 +211,7 @@ function startBackgroundJob(
     env: { ...process.env },
   });
   worker.unref();
-  return { background: true, job_id: jobId, agent: delegate.agent, status: "queued" };
+  return { background: true, job_id: delegationId, agent: delegate.agent, status: "queued" };
 }
 
 function runDelegate(
@@ -343,6 +366,9 @@ export default function delegationExtension(pi: ExtensionAPI) {
   let directAbort: AbortController | undefined;
   let directLoader: Loader | undefined;
   let backgroundPoller: NodeJS.Timeout | undefined;
+  let watchedDelegation: string | undefined;
+  let joinedDelegation: string | undefined;
+  const watchedOffsets = new Map<string, number>();
 
   const renderTools = (result: DelegateResult, expanded: boolean, theme: any): Container => {
     const container = new Container();
@@ -426,6 +452,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
         Type.Literal("foreground"),
         Type.Literal("background"),
       ], { description: "Foreground by default; background only when explicitly requested" })),
+      delegation_id: Type.Optional(Type.String({ description: "Existing delegation id when continuing or correcting the same managed outcome" })),
     }),
     renderShell: "self",
     async execute(_id, params, signal, onUpdate) {
@@ -433,8 +460,9 @@ export default function delegationExtension(pi: ExtensionAPI) {
       if (!delegate) throw new Error(`Unknown Pipal agent ${params.agent}. Available: ${available}`);
       if (callsThisTurn >= (runtime.max_turns ?? 8)) throw new Error(`Delegation turn budget reached (${runtime.max_turns ?? 8})`);
       callsThisTurn += 1;
+      const delegationId = params.delegation_id ?? `dg-${randomUUID().slice(0, 8)}`;
       if (params.mode === "background") {
-        const background = startBackgroundJob(runtime, delegate, params.message, params.acceptance_criteria);
+        const background = startBackgroundJob(runtime, delegate, params.message, params.acceptance_criteria, { delegationId });
         return {
           content: [{ type: "text", text: `Background delegation ${background.job_id} assigned to @agent:${delegate.agent}. It will continue if this TUI closes.` }],
           details: background,
@@ -445,13 +473,15 @@ export default function delegationExtension(pi: ExtensionAPI) {
         author: runtime.primary,
         content: params.message,
         acceptance_criteria: params.acceptance_criteria,
+        delegation_id: delegationId,
       });
       const result = await runQueued(delegate, runtime.primary, params.message, params.acceptance_criteria, signal, (partial) => {
         onUpdate?.({ content: [{ type: "text", text: partial.text || `@agent:${delegate.agent} is ${partial.status}…` }], details: partial });
       });
-      appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)" });
+      result.delegationId = delegationId;
+      appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: delegationId });
       return {
-        content: [{ type: "text", text: result.text || "(no response)" }],
+        content: [{ type: "text", text: `Delegation ${delegationId}\n\n${result.text || "(no response)"}` }],
         details: result,
         usage: {
           input: result.inputTokens,
@@ -483,6 +513,103 @@ export default function delegationExtension(pi: ExtensionAPI) {
     },
   });
 
+  const teams = new Map((runtime.teams ?? []).map((team) => [team.name.toLowerCase(), team]));
+  const teamNames = [...teams.values()].map((team) => team.name).join(", ");
+  if (teams.size > 0) pi.registerTool({
+    name: "pipal_delegate_team",
+    label: "Delegate to Pipal team",
+    description: `Assign one managed outcome to a saved Pipal team. Teams: ${teamNames}. Members work in parallel; inspect their results, follow up with individuals as needed, and synthesize the outcome.`,
+    promptSnippet: "Coordinate outcome-oriented work across a saved Pipal team",
+    promptGuidelines: [
+      "Use a team when independent specialist perspectives or parallel work add value.",
+      "You remain the accountable owner: compare contributions, resolve gaps with follow-up delegations, and deliver one synthesis.",
+      "Detailed member activity stays compact unless the owner asks to watch or join it.",
+      "Foreground is the default. Use background only when explicitly requested or approved.",
+    ],
+    parameters: Type.Object({
+      team: Type.String({ description: "Saved Pipal team name" }),
+      message: Type.String({ description: "Shared goal, context, and requested contribution" }),
+      acceptance_criteria: Type.Optional(Type.String({ description: "Conditions the combined team outcome must satisfy" })),
+      mode: Type.Optional(Type.Union([Type.Literal("foreground"), Type.Literal("background")])),
+      delegation_id: Type.Optional(Type.String({ description: "Existing team delegation id for a follow-up round" })),
+    }),
+    renderShell: "self",
+    async execute(_id, params, signal, onUpdate) {
+      const team = teams.get(params.team.toLowerCase());
+      if (!team) throw new Error(`Unknown Pipal team ${params.team}. Available: ${teamNames}`);
+      const participants = team.members
+        .map((member) => ({ member, delegate: byName.get(member.agent.toLowerCase()) }))
+        .filter((item): item is { member: { agent: string; role?: string }; delegate: DelegateRuntime } => Boolean(item.delegate));
+      if (participants.length === 0) throw new Error(`Team ${team.name} has no available delegates besides the primary agent`);
+      const delegationId = params.delegation_id ?? `dg-${randomUUID().slice(0, 8)}`;
+      if (params.mode === "background") {
+        const jobs = participants.map(({ delegate }) => startBackgroundJob(
+          runtime, delegate, params.message, params.acceptance_criteria,
+          { delegationId, team: team.name },
+        ));
+        const details: TeamDelegateResult = { team: team.name, delegation_id: delegationId, background: true, results: [], jobs };
+        return {
+          content: [{ type: "text", text: `Background team delegation ${delegationId} started with ${participants.map(({ delegate }) => `@agent:${delegate.agent}`).join(", ")}. It will continue if this TUI closes.` }],
+          details,
+        };
+      }
+      const partial = new Map<string, DelegateResult>();
+      const results = await Promise.all(participants.map(async ({ member, delegate }) => {
+        const roleContext = `You are contributing as ${member.role ?? delegate.role} in team ${team.name}.\n\n${params.message}`;
+        appendEvent(delegate, {
+          type: "message", author: runtime.primary, content: roleContext,
+          acceptance_criteria: params.acceptance_criteria, delegation_id: delegationId, team: team.name,
+        });
+        const result = await runQueued(delegate, runtime.primary, roleContext, params.acceptance_criteria, signal, (update) => {
+          update.delegationId = delegationId;
+          partial.set(delegate.agent, update);
+          onUpdate?.({
+            content: [{ type: "text", text: `${partial.size}/${participants.length} team members active` }],
+            details: { team: team.name, delegation_id: delegationId, background: false, results: [...partial.values()] } as TeamDelegateResult,
+          });
+        });
+        result.delegationId = delegationId;
+        appendEvent(delegate, {
+          type: "message", author: delegate.agent, content: result.text || "(no response)",
+          delegation_id: delegationId, team: team.name,
+        });
+        return result;
+      }));
+      const details: TeamDelegateResult = { team: team.name, delegation_id: delegationId, background: false, results };
+      return {
+        content: [{ type: "text", text: `Team delegation ${delegationId}\n\n${results.map((result) => `@agent:${result.agent}: ${result.text}`).join("\n\n")}` }],
+        details,
+      };
+    },
+    renderCall(args, theme) {
+      return new Text(`${theme.fg("accent", theme.bold(`@team:${args.team}`))}\n${theme.fg("dim", String(args.message ?? ""))}`, 1, 0);
+    },
+    renderResult(result, { expanded }, theme) {
+      const details = result.details as TeamDelegateResult | undefined;
+      if (!details) return new Text("", 0, 0);
+      if (details.background) {
+        return new Text(theme.fg("accent", `↗ ${details.delegation_id} · @team:${details.team} · ${details.jobs?.length ?? 0} agents running in background`), 1, 0);
+      }
+      if (!expanded) {
+        const active = details.results.filter((item) => item.status === "running").length;
+        const state = active ? `${active} active` : `${details.results.length} contributions complete`;
+        return new Text(theme.fg("accent", `${details.delegation_id} · @team:${details.team} · ${state}`), 1, 0);
+      }
+      const container = new Container();
+      details.results.forEach((memberResult, index) => {
+        if (index) container.addChild(new Spacer(1));
+        const tools = renderTools(memberResult, expanded, theme);
+        container.addChild(tools);
+        if (memberResult.text) {
+          const response = new Box(1, 1, (value) => theme.bg("toolSuccessBg", value));
+          response.addChild(new Markdown(`**@agent:${memberResult.agent}:** ${memberResult.text}`, 0, 0, getMarkdownTheme()));
+          container.addChild(response);
+        }
+      });
+      return container;
+    },
+  });
+
   pi.registerEntryRenderer("pipal-direct-owner", (entry, _options, _theme) => {
     const data = entry.data as { text: string; targets: string };
     return new Markdown(`**Owner → ${data.targets}:**\n\n${data.text}`, 0, 0, getMarkdownTheme());
@@ -495,6 +622,21 @@ export default function delegationExtension(pi: ExtensionAPI) {
   });
   pi.registerEntryRenderer("pipal-direct-error", (entry, _options, theme) =>
     new Text(theme.fg("error", `Delegation error: ${(entry.data as { text: string }).text}`), 0, 0));
+  pi.registerMessageRenderer("pipal-delegation-complete", (message, _options, theme) =>
+    new Text(theme.fg("accent", `Delegation ready for primary review: ${(message.details as any)?.delegation_id ?? ""}`), 0, 0));
+  pi.registerEntryRenderer("pipal-delegation-event", (entry, _options, theme) => {
+    const { job, event } = entry.data as any;
+    const prefix = theme.fg("accent", theme.bold(`@agent:${job.delegate.agent}`));
+    if (event.type === "tool_execution_start") {
+      return new Text(`${prefix} ${theme.fg("dim", `→ ${event.toolName} ${JSON.stringify(event.args ?? {})}`)}`, 0, 0);
+    }
+    if (event.type === "tool_execution_end") {
+      const output = resultText(event.result);
+      return new Text(`${prefix} ${theme.fg(event.isError ? "error" : "success", `← ${event.toolName}`)}${output ? `\n${output}` : ""}`, 0, 0);
+    }
+    const text = assistantText(event.message);
+    return new Markdown(`**@agent:${job.delegate.agent}:** ${text}`, 0, 0, getMarkdownTheme());
+  });
   pi.registerEntryRenderer("pipal-background-result", (entry, _options, theme) => {
     const job = entry.data as any;
     const color = job.status === "completed" ? "success" : "error";
@@ -511,12 +653,51 @@ export default function delegationExtension(pi: ExtensionAPI) {
     }
     return jobs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   };
+  const reportWatchedEvents = () => {
+    if (!watchedDelegation) return;
+    for (const job of readBackgroundJobs().filter((item) => item.id === watchedDelegation || item.delegation_id === watchedDelegation)) {
+      const eventFile = `${runtime.background_root}/${job.id}/events.jsonl`;
+      if (!fs.existsSync(eventFile)) continue;
+      const lines = fs.readFileSync(eventFile, "utf8").split("\n").filter(Boolean);
+      const offset = watchedOffsets.get(job.id) ?? 0;
+      for (const line of lines.slice(offset)) {
+        try {
+          const event = JSON.parse(line);
+          if (["tool_execution_start", "tool_execution_end"].includes(event.type)
+              || (event.type === "message_end" && assistantText(event.message))) {
+            pi.appendEntry("pipal-delegation-event", { job, event });
+          }
+        } catch { /* partial event */ }
+      }
+      watchedOffsets.set(job.id, lines.length);
+    }
+  };
   const reportFinishedJobs = () => {
-    for (const job of readBackgroundJobs()) {
+    const jobs = readBackgroundJobs();
+    for (const job of jobs) {
       if (job.reported || !["completed", "failed", "cancelled"].includes(job.status)) continue;
       pi.appendEntry("pipal-background-result", job);
       job.reported = true;
       fs.writeFileSync(`${runtime.background_root}/${job.id}/job.json`, `${JSON.stringify(job, null, 2)}\n`, "utf8");
+    }
+    const groups = new Map<string, any[]>();
+    for (const job of jobs) {
+      const id = job.delegation_id ?? job.id;
+      groups.set(id, [...(groups.get(id) ?? []), job]);
+    }
+    for (const [id, members] of groups) {
+      if (!members.every((job) => ["completed", "failed", "cancelled"].includes(job.status))) continue;
+      const notificationDir = `${runtime.background_root}/.notifications`;
+      const marker = `${notificationDir}/${id}.json`;
+      if (fs.existsSync(marker)) continue;
+      fs.mkdirSync(notificationDir, { recursive: true });
+      fs.writeFileSync(marker, `${JSON.stringify({ delegation_id: id, notified_at: new Date().toISOString() })}\n`, "utf8");
+      pi.sendMessage({
+        customType: "pipal-delegation-complete",
+        content: `Background delegation ${id} has finished. You remain accountable for the outcome. Use pipal_delegation_status with job_id ${id} now, inspect every result and failure against the acceptance criteria, request any necessary corrections through the persistent agent threads, validate where practical, and report one concise completed outcome or genuine blocker to the owner.`,
+        display: true,
+        details: { delegation_id: id },
+      }, { triggerTurn: true, deliverAs: "followUp" });
     }
   };
 
@@ -530,9 +711,22 @@ export default function delegationExtension(pi: ExtensionAPI) {
     }),
     async execute(_id, params) {
       const jobs = readBackgroundJobs();
-      const selected = params.job_id ? jobs.filter((job) => job.id === params.job_id) : jobs;
+      const selected = params.job_id ? jobs.filter((job) => job.id === params.job_id || job.delegation_id === params.job_id) : jobs;
       if (params.job_id && selected.length === 0) throw new Error(`Unknown background delegation ${params.job_id}`);
-      return { content: [{ type: "text", text: JSON.stringify(selected, null, 2) }], details: { count: selected.length } };
+      const summary = selected.map((job) => ({
+        id: job.id,
+        delegation_id: job.delegation_id ?? job.id,
+        team: job.team,
+        agent: job.delegate.agent,
+        status: job.status,
+        goal: job.message,
+        acceptance_criteria: job.acceptance_criteria,
+        result: job.result,
+        error: job.error,
+        created_at: job.created_at,
+        finished_at: job.finished_at,
+      }));
+      return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }], details: { count: selected.length } };
     },
   });
 
@@ -541,16 +735,100 @@ export default function delegationExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const jobs = readBackgroundJobs();
       if (jobs.length === 0) return ctx.ui.notify("No background delegations", "info");
-      ctx.ui.notify(jobs.map((job) => `${job.id} @agent:${job.delegate.agent} ${job.status}`).join("\n"), "info");
+      const grouped = new Map<string, any[]>();
+      for (const job of jobs) {
+        const id = job.delegation_id ?? job.id;
+        grouped.set(id, [...(grouped.get(id) ?? []), job]);
+      }
+      ctx.ui.notify([...grouped].map(([id, items]) => {
+        const team = items[0].team ? ` @team:${items[0].team}` : "";
+        const statuses = [...new Set(items.map((item) => item.status))].join("/");
+        return `${id}${team} · ${items.length} agent${items.length === 1 ? "" : "s"} · ${statuses}`;
+      }).join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("cancel-delegation", {
+    description: "Cancel background delegated work: /cancel-delegation <dg-id>",
+    handler: async (args, ctx) => {
+      const id = args.trim();
+      if (!id) return ctx.ui.notify("Usage: /cancel-delegation <dg-id>", "warning");
+      const jobs = readBackgroundJobs().filter((job) => job.id === id || job.delegation_id === id);
+      if (jobs.length === 0) return ctx.ui.notify(`Unknown delegation ${id}`, "error");
+      for (const job of jobs) {
+        if (job.pid && ["queued", "running"].includes(job.status)) {
+          try { process.kill(job.pid, "SIGTERM"); } catch { /* already exited */ }
+        }
+        if (["queued", "running"].includes(job.status)) {
+          job.status = "cancelled";
+          job.error = "Cancelled by owner";
+          job.finished_at = new Date().toISOString();
+          fs.writeFileSync(`${runtime.background_root}/${job.id}/job.json`, `${JSON.stringify(job, null, 2)}\n`, "utf8");
+        }
+      }
+      ctx.ui.notify(`Cancelled ${id}`, "warning");
+    },
+  });
+
+  pi.registerCommand("watch", {
+    description: "Watch a background delegation: /watch <dg-id>",
+    handler: async (args, ctx) => {
+      const id = args.trim();
+      if (!id) return ctx.ui.notify("Usage: /watch <dg-id>", "warning");
+      const found = readBackgroundJobs().some((job) => job.id === id || job.delegation_id === id);
+      if (!found) return ctx.ui.notify(`Unknown delegation ${id}`, "error");
+      watchedDelegation = id;
+      watchedOffsets.clear();
+      reportWatchedEvents();
+      ctx.ui.notify(`Watching ${id}. Use /detach to stop watching; work continues.`, "info");
+    },
+  });
+  pi.registerCommand("join", {
+    description: "Watch and participate in delegated work: /join <dg-id>",
+    handler: async (args, ctx) => {
+      const id = args.trim();
+      if (!id) return ctx.ui.notify("Usage: /join <dg-id>", "warning");
+      const found = readBackgroundJobs().some((job) => job.id === id || job.delegation_id === id);
+      if (!found) return ctx.ui.notify(`Unknown delegation ${id}`, "error");
+      watchedDelegation = id;
+      joinedDelegation = id;
+      watchedOffsets.clear();
+      reportWatchedEvents();
+      ctx.ui.notify(`Joined ${id}. Use @agent:<name> or @team; active turns receive interventions as follow-ups.`, "info");
+    },
+  });
+  pi.registerCommand("detach", {
+    description: "Stop watching delegated work without cancelling it",
+    handler: async (_args, ctx) => {
+      if (!watchedDelegation) return ctx.ui.notify("No delegation is currently being watched", "info");
+      const id = watchedDelegation;
+      watchedDelegation = undefined;
+      joinedDelegation = undefined;
+      watchedOffsets.clear();
+      ctx.ui.notify(`Detached from ${id}; work continues.`, "info");
     },
   });
 
   pi.on("input", async (event, ctx) => {
     callsThisTurn = 0;
-    const text = event.text.replace(/\\@agent:/g, "@agent:");
+    let text = event.text.replace(/\\@agent:/g, "@agent:").replace(/\\@team/g, "@team");
     const names = [...text.matchAll(/@agent:([\w.-]+)/g)].map((match) => match[1].toLowerCase());
+    const teamMentions = [...text.matchAll(/@team(?::([\w.-]+))?/g)];
+    for (const match of teamMentions) {
+      const teamName = match[1]?.toLowerCase();
+      if (teamName) {
+        for (const member of teams.get(teamName)?.members ?? []) names.push(member.agent.toLowerCase());
+      } else if (joinedDelegation) {
+        for (const job of readBackgroundJobs().filter((item) => item.id === joinedDelegation || item.delegation_id === joinedDelegation)) {
+          names.push(String(job.delegate.agent).toLowerCase());
+        }
+      }
+    }
     const targets = [...new Set(names)].map((name) => byName.get(name)).filter(Boolean) as DelegateRuntime[];
     if (targets.length === 0) return { action: "continue" };
+    if (joinedDelegation) {
+      text = `Owner intervention for active delegation ${joinedDelegation}. Treat this as a follow-up in that outcome and consult its persistent transcript as needed.\n\n${text}`;
+    }
 
     pi.appendEntry("pipal-direct-owner", { text, targets: targets.map((target) => `@agent:${target.agent}`).join(", ") });
     directAbort?.abort();
@@ -561,8 +839,26 @@ export default function delegationExtension(pi: ExtensionAPI) {
       return directLoader;
     });
     try {
+      if (joinedDelegation) {
+        const targetNames = new Set(targets.map((target) => target.agent.toLowerCase()));
+        const deadline = Date.now() + (runtime.agent_timeout_seconds ?? 300) * 1000;
+        let notified = false;
+        while (Date.now() < deadline && !controller.signal.aborted) {
+          const active = readBackgroundJobs().some((job) =>
+            (job.id === joinedDelegation || job.delegation_id === joinedDelegation)
+            && targetNames.has(String(job.delegate.agent).toLowerCase())
+            && ["queued", "running"].includes(job.status));
+          if (!active) break;
+          if (!notified) {
+            ctx.ui.notify(`Intervention queued for ${joinedDelegation}; waiting for active agent turns to finish`, "info");
+            notified = true;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (controller.signal.aborted) throw new Error("Joined delegation intervention cancelled");
+      }
       await Promise.all(targets.map(async (delegate) => {
-        appendEvent(delegate, { type: "message", author: "owner", content: text });
+        appendEvent(delegate, { type: "message", author: "owner", content: text, delegation_id: joinedDelegation });
         let latest: DelegateResult | undefined;
         const result = await runQueued(delegate, "owner", text, undefined, controller.signal, (partial) => {
           latest = partial;
@@ -575,7 +871,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
         });
         ctx.ui.setWidget(`pipal-direct-live-${delegate.agent}`, undefined);
         if (result.tools.length > 0) pi.appendEntry("pipal-direct-tools", { result });
-        appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)" });
+        appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: joinedDelegation });
         pi.appendEntry("pipal-direct-reply", { agent: delegate.agent, text: result.text || "(no response)" });
       }));
     } catch (error) {
@@ -595,13 +891,17 @@ export default function delegationExtension(pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     reportFinishedJobs();
-    backgroundPoller = setInterval(reportFinishedJobs, 2000);
+    backgroundPoller = setInterval(() => {
+      reportWatchedEvents();
+      reportFinishedJobs();
+    }, 1000);
     const names = new Set(runtime.delegates.map((delegate) => delegate.agent.toLowerCase()));
     ctx.ui.setEditorComponent((tui, theme, keybindings) => new DelegationEditor(
       tui,
       theme,
       keybindings,
       names,
+      new Set((runtime.teams ?? []).map((team) => team.name.toLowerCase())),
       () => {
         if (!directAbort) return false;
         directAbort.abort();
@@ -613,14 +913,19 @@ export default function delegationExtension(pi: ExtensionAPI) {
       triggerCharacters: ["@"],
       async getSuggestions(lines, line, col, options) {
         const before = (lines[line] ?? "").slice(0, col);
-        const match = before.match(/(?:^|\s)@agent:([\w.-]*)$/);
-        if (!match) return current.getSuggestions(lines, line, col, options);
-        const query = match[1].toLowerCase();
-        const items = runtime.delegates
-          .filter((delegate) => delegate.agent.toLowerCase().includes(query))
-          .map((delegate) => ({ value: `@agent:${delegate.agent}`, label: `@agent:${delegate.agent}`, description: delegate.model ?? "Pipal agent" }));
+        const agentMatch = before.match(/(?:^|\s)@agent:([\w.-]*)$/);
+        const teamMatch = before.match(/(?:^|\s)@team:([\w.-]*)$/);
+        if (!agentMatch && !teamMatch) return current.getSuggestions(lines, line, col, options);
+        const query = (agentMatch?.[1] ?? teamMatch?.[1] ?? "").toLowerCase();
+        const items = agentMatch
+          ? runtime.delegates
+              .filter((delegate) => delegate.agent.toLowerCase().includes(query))
+              .map((delegate) => ({ value: `@agent:${delegate.agent}`, label: `@agent:${delegate.agent}`, description: delegate.model ?? "Pipal agent" }))
+          : (runtime.teams ?? [])
+              .filter((team) => team.name.toLowerCase().includes(query))
+              .map((team) => ({ value: `@team:${team.name}`, label: `@team:${team.name}`, description: `${team.members.length} members` }));
         if (options.signal.aborted || items.length === 0) return null;
-        return { prefix: `@agent:${match[1]}`, items };
+        return { prefix: agentMatch ? `@agent:${agentMatch[1]}` : `@team:${teamMatch![1]}`, items };
       },
       applyCompletion(lines, line, col, item, prefix) {
         return current.applyCompletion(lines, line, col, item, prefix);

@@ -9,8 +9,12 @@ def test_background_delegation_worker_completes_and_persists_result(tmp_path):
     fake_pi.write_text(
         """#!/usr/bin/env python3
 import json
+args = {"command": "pwd"}
+result = {"content": [{"type": "text", "text": "verified"}], "details": {}}
+print(json.dumps({"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "bash", "args": args}), flush=True)
+print(json.dumps({"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "bash", "args": args, "result": result, "isError": False}), flush=True)
 message = {"role": "assistant", "content": [{"type": "text", "text": "completed artifact"}]}
-print(json.dumps({"type": "message_end", "message": message}))
+print(json.dumps({"type": "message_end", "message": message}), flush=True)
 """,
         encoding="utf-8",
     )
@@ -46,8 +50,13 @@ print(json.dumps({"type": "message_end", "message": message}))
     completed = json.loads(job_file.read_text(encoding="utf-8"))
     assert completed["status"] == "completed"
     assert completed["result"] == "completed artifact"
-    events = [json.loads(line) for line in transcript.read_text().splitlines()]
-    assert [(event["author"], event["content"]) for event in events] == [
-        ("sasha", "finish the artifact"),
-        ("ada", "completed artifact"),
+    streamed = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert [event["type"] for event in streamed] == [
+        "tool_execution_start",
+        "tool_execution_end",
+        "message_end",
     ]
+    events = [json.loads(line) for line in transcript.read_text().splitlines()]
+    messages = [(event["author"], event["content"]) for event in events if event["type"] == "message"]
+    assert messages == [("sasha", "finish the artifact"), ("ada", "completed artifact")]
+    assert next(event for event in events if event["type"] == "tool_result")["output"] == "verified"

@@ -114,9 +114,10 @@ Extensions are loaded via `--extension` when launching pi.
 Pipal treats registered agents as persistent communication endpoints. A normal primary-agent chat exposes two paths through the same delegate runtime:
 
 - explicit `@agent:<name>` messages bypass the primary and run the named agent directly;
-- the `pipal_delegate` tool lets the primary own an outcome through repeated messages in a persistent agent-to-agent thread.
+- the `pipal_delegate` tool lets the primary own an outcome through repeated messages in a persistent agent-to-agent thread;
+- the `pipal_delegate_team` tool resolves a saved team into parallel persistent participants while the primary retains ownership and synthesis responsibility.
 
-Each primary/topic/delegate tuple has an append-only transcript and an independent native Pi session. Both direct messages and delegated turns share cwd handling, event streaming, native-style tool rendering, cancellation, timeouts, and persistence. The primary model is instructed to frame acceptance criteria, inspect work, continue with corrections, validate completion, and report an outcome rather than relay one response. See [delegation.md](delegation.md).
+Each primary/topic/delegate tuple has an append-only transcript and an independent native Pi session. Both direct messages and delegated turns share cwd handling, event streaming, native-style tool rendering, cancellation, timeouts, and persistence. Background team member jobs share one delegation id and emit durable event streams that can be watched, joined with queued follow-up interventions, or detached without stopping execution. The primary model is instructed to frame acceptance criteria, inspect work, continue with corrections, validate completion, and report an outcome rather than relay one response. See [delegation.md](delegation.md).
 
 ## Teams
 
@@ -124,7 +125,7 @@ A team is a human-owned group of registered Pipal agents. It reuses topics as th
 
 `pipal team chat <team> --topic <topic>` uses Pi's terminal shell with Pipal's `team_chat.ts` room extension, but no agent owns the host session. Pipal owns input dispatch, deterministic `@` routing, the roster, activity state, rendering, and the canonical append-only `transcript.jsonl`. Every participant—including the manager—runs in an isolated native Pi session with its own persona, model, tools, and history. Agents know how to inspect the shared transcript lazily when a request requires prior room context. Unaddressed messages default to the manager; explicit mentions bypass it.
 
-The current implementation has a flat roster with a manager role and deterministic mention routing. It is a vertical slice toward richer hierarchy, permissions, budgets, and agent-to-agent workflows. See [teams.md](teams.md).
+The current implementation has a flat roster with a manager role and deterministic mention routing. The roster is also available from normal primary-agent chat as a delegation resource; a dedicated room is therefore an optional visible collaboration surface rather than the required way to use a team. See [teams.md](teams.md).
 
 ## Tasks and daemon
 

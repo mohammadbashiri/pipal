@@ -114,7 +114,7 @@ Current topic: {topic_name}
 
 For questions about prior context ("what did we do last time", etc.), read topics/{topic_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home.
 
-Persistent direct/delegation threads with other registered Pipal agents live under topics/{topic_name}/delegations/<agent>/. Use the `pipal_delegate` tool to hold a multi-turn thread and own the delegated outcome; do not act as a one-shot relay."""
+Persistent direct/delegation threads with other registered Pipal agents live under topics/{topic_name}/delegations/<agent>/. Use `pipal_delegate` for one agent and `pipal_delegate_team` for a saved team. Hold multi-turn threads and own delegated outcomes; do not act as a one-shot relay. Normal primary-agent chat is the default entry point. Keep detailed coordination compact unless the owner asks to watch or join it."""
 
 
 def build_pipal_context(agent: Path, topic_name: str) -> str:

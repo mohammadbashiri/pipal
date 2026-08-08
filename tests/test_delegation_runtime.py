@@ -27,6 +27,19 @@ def test_build_delegation_runtime_creates_persistent_threads(tmp_path, monkeypat
         lambda path: f"Persona for {Path(path).name}",
     )
     monkeypatch.setattr(delegation_runtime, "_find_native_pi", lambda: "/fake/pi")
+    monkeypatch.setattr(
+        delegation_runtime,
+        "list_teams",
+        lambda: [{
+            "name": "research",
+            "manager": "sasha",
+            "members": [
+                {"agent": "sasha", "role": "Manager"},
+                {"agent": "ada", "role": "Researcher"},
+                {"agent": "missing", "role": "Reviewer"},
+            ],
+        }],
+    )
 
     cwd = tmp_path / "project"
     cwd.mkdir()
@@ -41,6 +54,14 @@ def test_build_delegation_runtime_creates_persistent_threads(tmp_path, monkeypat
     assert runtime["primary"] == "sasha"
     assert runtime["working_dir"] == str(cwd)
     assert [item["agent"] for item in runtime["delegates"]] == ["ada", "raven"]
+    assert runtime["teams"] == [{
+        "name": "research",
+        "manager": "sasha",
+        "members": [
+            {"agent": "sasha", "role": "Manager"},
+            {"agent": "ada", "role": "Researcher"},
+        ],
+    }]
     assert all(item["agent"] != "sasha" for item in runtime["delegates"])
     for item in runtime["delegates"]:
         assert Path(item["transcript_file"]).is_file()
