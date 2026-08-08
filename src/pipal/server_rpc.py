@@ -69,15 +69,21 @@ class PiRpcClient:
 
         return cmd
 
+    def _build_env(self) -> dict[str, str]:
+        return {
+            **dict(os.environ),
+            "PIPAL_AGENT_DIR": str(self.agent_dir),
+            "PIPAL_TOPIC": self.topic_name,
+            # RPC clients send their own first prompt. An unsolicited greeting can
+            # race with and discard that prompt while Pi is already streaming.
+            "PIPAL_DISABLE_AUTOGREET": "1",
+        }
+
     async def start(self) -> None:
         if self.proc:
             return
         cmd = self._build_cmd()
-        env = {
-            **dict(os.environ),
-            "PIPAL_AGENT_DIR": str(self.agent_dir),
-            "PIPAL_TOPIC": self.topic_name,
-        }
+        env = self._build_env()
         self.proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
