@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+import hmac
 import ipaddress
 from pathlib import Path
 from typing import Optional
@@ -37,15 +38,21 @@ def create_app(
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=list(settings.cors_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
     )
+
+    def _bearer_token(value: str | None) -> str | None:
+        if not value:
+            return None
+        scheme, _, token = value.partition(" ")
+        return token if scheme.lower() == "bearer" and token else None
 
     def require_auth(token: Optional[str]) -> None:
         expected = settings.auth_token
-        if expected and token != expected:
+        if expected and (not token or not hmac.compare_digest(token, expected)):
             raise HTTPException(status_code=401, detail="Unauthorized")
 
     def _list_agents() -> list[AgentInfo]:
@@ -123,10 +130,7 @@ def create_app(
     async def auth_middleware(request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
-        if request.url.path.startswith("/health"):
-            return await call_next(request)
-        token = request.headers.get("Authorization")
-        token = token.split("Bearer ")[-1] if token else None
+        token = _bearer_token(request.headers.get("Authorization"))
         try:
             require_auth(token)
         except HTTPException as exc:
@@ -205,11 +209,14 @@ def create_app(
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
-        token = websocket.headers.get("Authorization")
-        token = token.split("Bearer ")[-1] if token else None
-        query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
-        effective_token = token or query_token
-        if settings.auth_token and effective_token != settings.auth_token:
+        origin = websocket.headers.get("origin")
+        if origin and origin.rstrip("/") not in settings.cors_origins:
+            await websocket.close(code=4403)
+            return
+        token = _bearer_token(websocket.headers.get("Authorization"))
+        try:
+            require_auth(token)
+        except HTTPException:
             await websocket.close(code=4401)
             return
 
@@ -340,6 +347,8 @@ def run_server(
             "Refusing non-local bind without PIPAL_AUTH_TOKEN. "
             "Set a long random token and use network controls such as TLS, a firewall, or a VPN."
         )
+    if is_non_local_bind and len(settings.auth_token) < 32:
+        raise SystemExit("Refusing non-local bind with a token shorter than 32 characters.")
 
     app = create_app(
         agent_scope=agent,

@@ -450,6 +450,8 @@ export default function delegationExtension(pi: ExtensionAPI) {
       "Inspect the delegate's work. Continue the same agent thread with corrections or follow-up requests until the outcome is complete or genuinely blocked.",
       "Validate claims and artifacts where practical, then report the completed result rather than merely forwarding the delegate's response.",
       "Use parallel pipal_delegate calls when independent work can safely happen concurrently.",
+      "Before broad multi-agent execution, present the owner with a delegation plan covering assignments, dependencies, parallel waves, and integration responsibility; wait for explicit confirmation before launching it.",
+      "After approval, launch background work in the current topic, return delegation IDs immediately, and keep the owner chat available. Never silently create or switch to another topic.",
       "Foreground is the default. Use background mode only when the owner explicitly asks, or after suggesting it for long independent work.",
       "Respect user approval boundaries for critical or external actions.",
     ],
@@ -533,6 +535,8 @@ export default function delegationExtension(pi: ExtensionAPI) {
       "Use a team when independent specialist perspectives or parallel work add value.",
       "You remain the accountable owner: compare contributions, resolve gaps with follow-up delegations, and deliver one synthesis.",
       "Detailed member activity stays compact unless the owner asks to watch or join it.",
+      "Before broad team execution, present assignments, dependencies, parallel waves, and integration responsibility; wait for explicit owner confirmation.",
+      "After approval, launch background work in the current topic, return its delegation id immediately, and keep the chat available. Never silently create or switch topics.",
       "Foreground is the default. Use background only when explicitly requested or approved.",
     ],
     parameters: Type.Object({

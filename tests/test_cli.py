@@ -1,5 +1,7 @@
 import pytest
+from pipal import cli
 from pipal.cli import build_parser, parse_llm_spec, parse_team_member_spec
+from pipal.registry import load_registry
 
 
 # ── parse_llm_spec ───────────────────────────────────────────────
@@ -61,6 +63,90 @@ def test_parser_agent_create_kbchat():
     args = p.parse_args(["agent", "create", "erwin", "--type", "kbchat", "--kb", "/tmp/kb"])
     assert args.type == "kbchat"
     assert args.kb_path == "/tmp/kb"
+
+
+def test_parser_agent_create_noninteractive_llm():
+    args = build_parser().parse_args([
+        "agent", "create", "momo", "--provider", "anthropic", "--model", "claude-sonnet",
+    ])
+    assert args.provider == "anthropic"
+    assert args.model == "claude-sonnet"
+
+
+def test_create_noninteractive_writes_llm(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIPAL_HOME", str(tmp_path / "home"))
+    agent_path = tmp_path / "agents" / "momo"
+    assert cli.main([
+        "agent", "create", "momo", str(tmp_path / "agents"),
+        "--provider", "fake", "--model", "test",
+    ]) == 0
+    assert (agent_path / "llm.json").read_text().find('"provider": "fake"') >= 0
+    assert load_registry()["agents"]["momo"] == str(agent_path)
+
+
+def test_create_failure_rolls_back_scaffold_and_registry(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIPAL_HOME", str(tmp_path / "home"))
+    def fail(*args, **kwargs):
+        raise OSError("simulated scaffold failure")
+    monkeypatch.setattr(cli, "ensure_agent_scaffold", fail)
+    agent_path = tmp_path / "agents" / "momo"
+    assert cli.main([
+        "agent", "create", "momo", str(tmp_path / "agents"),
+        "--provider", "fake", "--model", "test",
+    ]) == 2
+    assert not agent_path.exists()
+    assert not (tmp_path / "home" / "agents.json").exists()
+
+
+def test_create_rejects_partial_llm_flags_without_side_effects(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    legacy_home = tmp_path / "pi"
+    monkeypatch.setenv("PIPAL_HOME", str(home))
+    monkeypatch.setenv("PI_HOME", str(legacy_home))
+    (legacy_home / "agents.json").parent.mkdir()
+    (legacy_home / "agents.json").write_text('{"agents": {"legacy": "/tmp/legacy"}}\n')
+    agent_root = tmp_path / "agents"
+    assert cli.main([
+        "agent", "create", "momo", str(agent_root), "--provider", "fake",
+    ]) == 2
+    assert not agent_root.exists()
+    assert not (home / "agents.json").exists()
+    assert (legacy_home / "agents.json").exists()
+
+
+def test_create_failure_preserves_existing_agent_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIPAL_HOME", str(tmp_path / "home"))
+    agent_path = tmp_path / "agents" / "momo"
+    agent_path.mkdir(parents=True)
+    (agent_path / "custom.md").write_text("keep me")
+    (agent_path / "llm.json").write_text('{"provider":"old","model":"old-model"}\n')
+
+    def fail(*args, **kwargs):
+        raise OSError("simulated llm failure")
+    monkeypatch.setattr(cli, "write_llm_json", fail)
+
+    assert cli.main([
+        "agent", "create", "momo", str(tmp_path / "agents"),
+        "--provider", "fake", "--model", "test",
+    ]) == 2
+    assert (agent_path / "custom.md").read_text() == "keep me"
+    assert (agent_path / "llm.json").read_text() == '{"provider":"old","model":"old-model"}\n'
+    assert not (agent_path / "AGENTS.md").exists()
+    assert not (tmp_path / "home" / "agents.json").exists()
+
+
+def test_create_failure_preserves_existing_llm_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIPAL_HOME", str(tmp_path / "home"))
+    agent_path = tmp_path / "agents" / "momo"
+    (agent_path / "llm.json").mkdir(parents=True)
+
+    assert cli.main([
+        "agent", "create", "momo", str(tmp_path / "agents"),
+        "--provider", "fake", "--model", "test",
+    ]) == 2
+    assert (agent_path / "llm.json").is_dir()
+    assert not (agent_path / "AGENTS.md").exists()
+    assert not (tmp_path / "home" / "agents.json").exists()
 
 
 def test_parser_agent_chat():

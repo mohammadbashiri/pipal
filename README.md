@@ -29,7 +29,7 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 - persistent direct agent messaging and outcome-owned delegation
 - optional tasks, a daemon, and a local HTTP/WS server
 
-Built for local, single-user use. One person, one machine. Not a multi-tenant platform. Not hardened for the public internet.
+**Alpha / local-first:** pipal is designed for one person on one trusted machine. It is not a multi-tenant platform and is not hardened for the public internet. Agents run with the host user's permissions and are currently unsandboxed; treat prompts, tools, workspace files, transcripts, and reports as local data. Provider calls may incur usage charges, and `llm.json` stores the selected provider/model in plaintext (never put API keys in it). Review provider privacy, retention, and billing before delegating sensitive work.
 
 Largely prompted into existence and iterated through daily use.
 
@@ -80,6 +80,8 @@ Have product-team evaluate this in parallel and give me one synthesis.
 
 Use `/watch <dg-id>`, `/join <dg-id>`, and `/detach` to control visibility of background work. `/brief <dg-id>`, `/review <dg-id>`, and `/audit <dg-id>` provide durable executive, attributed decision-review, and full evidence-trace reports. Dedicated visible rooms remain available with `pipal team chat product-team --topic planning`.
 
-See [Pipal teams](docs/teams.md) and [persistent delegation](docs/delegation.md).
+See [Pipal teams](docs/teams.md) and [persistent delegation](docs/delegation.md) for direct messaging, outcome-owned delegation, background jobs, durable reports, and the accountable primary-agent review flow. Delegation results are claims until the primary verifies them; `/brief`, `/review`, and `/audit` expose progressively more reporting detail.
+
+Docker support is **experimental**; local installation is the supported alpha path. See [Docker usage](docs/docker.md) for isolation and networking caveats.
 
 To learn what else pipal does, use `--help` or ask your agent to check out the repo.

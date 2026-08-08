@@ -1,5 +1,9 @@
 # Docker usage
 
+> **Experimental alpha path:** Docker is not currently the primary supported installation path. Use local installation for the release path unless you have validated this image and its mounted-data behavior in your environment. The container does not sandbox the agent: mounted host directories and the container's available tools remain accessible to the process.
+
+Provider calls can incur costs, and local configuration/transcripts may contain sensitive plaintext. Use fresh, least-privilege data directories where possible; do not mount credentials or broad host paths unless intentional.
+
 ## Build image
 
 From the repo root:
@@ -32,13 +36,13 @@ docker run -it --rm \
 
 ```bash
 docker run -it --rm -p 127.0.0.1:8000:8000 \
-  -e PIPAL_AUTH_TOKEN="replace-with-long-random-token" \
+  -e PIPAL_AUTH_TOKEN="replace-with-at-least-32-random-characters" \
   -v ~/.pipal-docker:/home/pipal/.pipal \
   -v ~/.pi-docker:/home/pipal/.pi \
   pipal:latest serve --host 0.0.0.0 --port 8000
 ```
 
-Keep the published port on localhost unless remote access is intentional. For remote access, use TLS and network controls such as a VPN, firewall, or authenticated reverse proxy.
+Keep the published port on localhost unless remote access is intentional. For remote access, use TLS and network controls such as a VPN, firewall, or authenticated reverse proxy. The server and agent runtime are intended for trusted local use, not direct public exposure.
 
 ## Log in to pi inside the container
 ```bash

@@ -8,6 +8,38 @@ permissions:
   contents: read
 
 jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
+      - name: Audit locked runtime and development dependencies
+        run: uv run --locked pip-audit
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
+      - name: Build package
+        run: uv build --out-dir "$RUNNER_TEMP/pipal-dist"
+      - name: Install wheel in clean environment
+        run: |
+          set -euxo pipefail
+          python -m venv "$RUNNER_TEMP/pipal-wheel-venv"
+          wheel=$(find "$RUNNER_TEMP/pipal-dist" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          "$RUNNER_TEMP/pipal-wheel-venv/bin/python" -m pip install --no-cache-dir "$wheel"
+          "$RUNNER_TEMP/pipal-wheel-venv/bin/python" -m pip check
+          "$RUNNER_TEMP/pipal-wheel-venv/bin/pipal" --help
+          "$RUNNER_TEMP/pipal-wheel-venv/bin/python" -c 'import pipal; print(pipal.__file__)'
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

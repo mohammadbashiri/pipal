@@ -41,20 +41,24 @@ For local use:
 - use default localhost bind (`pipal serve` without `--host`)
 
 For any non-local exposure:
-- set `PIPAL_AUTH_TOKEN` to a long random value
+- set `PIPAL_AUTH_TOKEN` to a random value of at least 32 characters (shorter tokens are refused)
+- configure the exact browser origins that need API access with `PIPAL_CORS_ORIGINS` (comma-separated); wildcard origins are refused
 - run behind network controls (VPN/firewall/reverse proxy auth/TLS)
 - do not expose unauthenticated `pipal serve` on the public internet
 
 Pre-exposure verification checklist:
 1. Server bind is intentional (`--host 0.0.0.0` or non-loopback only when needed).
-2. `PIPAL_AUTH_TOKEN` is set and kept secret.
-3. External access is filtered (firewall/VPN/reverse proxy policy).
-4. TLS is enabled at ingress/reverse proxy for untrusted networks.
-5. You have tested that unauthenticated requests are rejected.
+2. `PIPAL_AUTH_TOKEN` is a random value of at least 32 characters and is kept secret.
+3. `PIPAL_CORS_ORIGINS` contains only the exact HTTPS origins that need browser access (if any; HTTP is only appropriate for local development).
+4. External access is filtered (firewall/VPN/reverse proxy policy).
+5. TLS is enabled at ingress/reverse proxy for untrusted networks.
+6. You have tested that unauthenticated requests are rejected.
 
 ## Hardening notes
 
 Current server behavior:
 - loopback binds may run without authentication
-- non-local binds require `PIPAL_AUTH_TOKEN` (or `AUTH_TOKEN`)
-- CORS is permissive for developer convenience; treat non-local exposure accordingly
+- non-local binds require a `PIPAL_AUTH_TOKEN` (or `AUTH_TOKEN`) of at least 32 characters
+- when a token is configured, every REST endpoint (including `/health`) and WebSocket connection requires an exact `Authorization: Bearer <token>` header; WebSocket query-string tokens are refused to avoid URL/log leakage
+- cross-origin browser access is disabled by default and is only enabled for explicit `PIPAL_CORS_ORIGINS`; credentials/cookies are not enabled. CORS is not authentication and does not restrict non-browser clients.
+- WebSocket connections with an `Origin` header must match `PIPAL_CORS_ORIGINS`. Native browser WebSocket clients cannot set `Authorization`; use a same-origin reverse proxy that authenticates/injects the header, or a WebSocket client that supports custom headers.

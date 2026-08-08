@@ -3,7 +3,7 @@ from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
-from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pipal_dir
+from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pipal_dir, registry_path
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
@@ -68,6 +68,16 @@ def build_parser():
     p_create.add_argument("path", nargs="?", default=None)
     p_create.add_argument("--type", default="default", help="Agent type (default: default)")
     p_create.add_argument("--kb", dest="kb_path", default=None, help="Knowledge base path (kbchat only)")
+    p_create.add_argument(
+        "--provider",
+        default=None,
+        help="LLM provider (noninteractive; requires --model; omit both for interactive setup)",
+    )
+    p_create.add_argument(
+        "--model",
+        default=None,
+        help="LLM model (noninteractive; requires --provider; omit both for interactive setup)",
+    )
 
     p_remove = sub2.add_parser("remove", help="Remove an agent")
     p_remove.add_argument("name")
@@ -211,13 +221,55 @@ def build_parser():
 
     return p
 
+def _rollback_agent_creation(
+    path: Path,
+    registry_before: bytes | None,
+    path_existed: bool,
+    created_paths: set[Path],
+) -> None:
+    """Undo the filesystem and registry changes made by ``agent create``."""
+    if path_existed:
+        # Scaffolding is intentionally non-destructive; preserve custom files.
+        for created in sorted(created_paths, key=lambda item: len(item.parts), reverse=True):
+            try:
+                if created.is_dir() and not created.is_symlink():
+                    created.rmdir()
+                else:
+                    created.unlink()
+            except FileNotFoundError:
+                pass
+    elif path.exists():
+        shutil.rmtree(path)
+
+    target = registry_path()
+    if registry_before is None:
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(registry_before)
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
 
+    args = build_parser().parse_args(argv)
+
+    # Validate before registry migration so an incomplete noninteractive request
+    # cannot create or migrate registry files.
+    if (
+        args.cmd == "agent"
+        and args.agent_cmd == "create"
+        and bool(args.provider) != bool(args.model)
+    ):
+        print("[red]--provider and --model must be supplied together.[/red]")
+        print("Omit both flags for interactive model selection.")
+        return 2
+
     if migrate_registry():
         print("[green]Migrated[/green] agent registry to ~/.pipal/agents.json")
-
-    args = build_parser().parse_args(argv)
 
     if args.cmd == "team":
         if args.team_cmd == "create":
@@ -653,35 +705,57 @@ def main(argv=None):
                 print("Valid types: default, kbchat")
                 return 2
 
-            base = args.path or str(pipal_dir() / "agents")
-            path = str((Path(base) / args.name).expanduser().resolve())
-            Path(path).mkdir(parents=True, exist_ok=True)
+            path_obj = (Path(args.path or str(pipal_dir() / "agents")) / args.name).expanduser().resolve()
+            path = str(path_obj)
+            path_existed = path_obj.exists()
+            before_paths = set(path_obj.rglob("*")) if path_existed and path_obj.is_dir() else set()
+            llm_path = path_obj / "llm.json"
+            llm_existed = llm_path.is_file()
+            llm_before = llm_path.read_bytes() if llm_existed else None
+            reg_file = registry_path()
+            registry_before = reg_file.read_bytes() if reg_file.exists() else None
+            try:
+                path_obj.mkdir(parents=True, exist_ok=True)
+                res = add_agent(args.name, path)  # should auto-create registry
+                if isinstance(res, dict) and res.get("registry_created"):
+                    print("[green]Created[/green] ~/.pipal/agents.json")
+                    print(f"[green]Registered[/green] {args.name} → {res['path']}")
+                else:
+                    p = res["path"] if isinstance(res, dict) else res
+                    print(f"[green]Registered[/green] {args.name} → {p}")
 
-            res = add_agent(args.name, path)  # should auto-create registry
-            if isinstance(res, dict) and res.get("registry_created"):
-                print("[green]Created[/green] ~/.pipal/agents.json")
-                print(f"[green]Registered[/green] {args.name} → {res['path']}")
-            else:
-                # if your add_agent returns just a path string
-                p = res["path"] if isinstance(res, dict) else res
-                print(f"[green]Registered[/green] {args.name} → {p}")
+                print(f"[green]Ensured directory[/green] {path}")
+                ensure_agent_scaffold(
+                    path,
+                    name=args.name,
+                    template=args.type,
+                    kb_path=args.kb_path,
+                    agent_type=args.type if args.type != "default" else None,
+                )
 
-            print(f"[green]Ensured directory[/green] {path}")
-
-            ensure_agent_scaffold(
-                path,
-                name=args.name,
-                template=args.type,
-                kb_path=args.kb_path,
-                agent_type=args.type if args.type != "default" else None,
-            )
-
-            if _interactive_set_llm(path, args.name):
+                if args.provider and args.model:
+                    written = write_llm_json(path, args.provider, args.model)
+                    print(f"[green]LLM[/green] provider={args.provider} model={args.model}")
+                elif _interactive_set_llm(path, args.name):
+                    return 0
+                else:
+                    print("[red]Model selection required.[/red]")
+                    print("Run `pi` and complete /login, then try again.")
+                    raise ValueError("Model selection required")
                 return 0
-
-            print("[red]Model selection required.[/red]")
-            print("Run `pi` and complete /login, then try again.")
-            return 2
+            except Exception as exc:
+                current_paths = set(path_obj.rglob("*")) if path_obj.exists() else set()
+                _rollback_agent_creation(path_obj, registry_before, path_existed, current_paths - before_paths)
+                if llm_existed:
+                    llm_path.write_bytes(llm_before)
+                elif llm_path.is_file() or llm_path.is_symlink():
+                    try:
+                        llm_path.unlink()
+                    except FileNotFoundError:
+                        pass
+                if str(exc) != "Model selection required":
+                    print(f"[red]Agent creation failed; rolled back:[/red] {exc}")
+                return 2
 
         if args.agent_cmd == "remove":
             a = get_agent(args.name)

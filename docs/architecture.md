@@ -109,6 +109,12 @@ pipal ships three pi extensions (TypeScript):
 
 Extensions are loaded via `--extension` when launching pi.
 
+## Product boundary
+
+Pipal provides local-first primitives for persistent agent communication, direct messaging, delegation, parallel/background execution, status, transcripts, artifacts, lineage, reporting, and audit. These primitives are intentionally composable through the TUI today and CLI/API surfaces over time.
+
+Pipal does **not** define a first-party organization model, company schema, position hierarchy, workflow/DAG designer, investment process, or autonomous hiring system. Users and downstream tools may build those structures from Pipal's generic primitives without making them core runtime concepts.
+
 ## Agent communication and delegation
 
 Pipal treats registered agents as persistent communication endpoints. A normal primary-agent chat exposes two paths through the same delegate runtime:

@@ -18,16 +18,22 @@ When a pipal release is cut, update this table with the exact pipal tag and the 
 
 ## Unreleased — 0.2.0 candidate
 
+**Release position:** local-first alpha for one trusted user and machine. The host runtime is unsandboxed, agents inherit host permissions, and provider requests may incur costs. Treat transcripts/reports and `llm.json` (provider/model metadata in plaintext) as local data; do not expose the service publicly or place secrets in agent files. Docker remains experimental unless the package and runtime path have been tested in CI for the target environment.
+
 ### Added
 
 - Native pi session listing, inspection, opening, and removal within a topic.
 - Topic/session documentation and automatic legacy-storage migration tests.
+- Direct messaging, outcome-owned delegation, background delegation controls, and durable executive/decision/audit reporting with accountable primary-agent synthesis.
+- Transactional agent creation with noninteractive `--provider`/`--model` setup; incomplete flag pairs fail before filesystem changes.
 
 ### Changed
 
 - Renamed Pipal's persistent named `session` container to `topic`; `session` now consistently means a native pi JSONL session.
 - Changed storage from `sessions/<topic>/*.jsonl` to `topics/<topic>/sessions/*.jsonl`. Existing data is migrated automatically.
 - Replaced Pipal topic-management commands and server routes that previously used `session` terminology. This is a compatibility-impacting CLI and API change; see [topics.md](topics.md).
+- `pipal agent create` remains interactive when both LLM flags are omitted; `--provider` and `--model` must now be supplied together for noninteractive creation.
+- Non-loopback server binds now require an authentication token of at least 32 characters. REST and WebSocket authentication use strict Bearer headers; WebSocket query-string tokens are no longer accepted. CORS is disabled by default and supports only explicit configured HTTP(S) origins. When authentication is configured, `/health` is authenticated too. See `SECURITY.md` for browser WebSocket and reverse-proxy implications.
 
 ## Release checklist
 
@@ -44,9 +50,15 @@ Run these steps before creating a release tag:
    - `pipal check-pi-compatibility`
    - `pipal agent create <name>`
    - `pipal agent chat <name>`
-6. Update compatibility matrix in this file with tested versions.
-7. Add release notes summary (highlights + any behavior changes).
-8. Tag and publish release.
+6. Verify package delivery:
+   - `uv build`
+   - install the wheel into a brand-new virtual environment
+   - run `pip check` and `pipal --help`
+7. Exercise delegation/reporting: direct message, foreground delegation, background `/watch`/`/join`/`/detach`, and `/brief`/`/review`/`/audit`; verify the primary reviews participant results before reporting.
+8. Confirm local-first safety wording, unsandboxed host-permission boundaries, plaintext config handling, provider cost/privacy guidance, and that Docker is explicitly experimental (unless target Docker behavior is CI-tested).
+9. Update compatibility matrix in this file with tested versions.
+10. Add release notes summary (highlights + any behavior changes).
+11. Tag and publish release.
 
 ## Changelog discipline
 

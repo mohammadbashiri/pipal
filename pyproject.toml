@@ -22,6 +22,7 @@ pipal = "pipal.cli:main"
 dev = [
     "pytest>=8.0",
     "httpx>=0.27.0",
+    "pip-audit>=2.9.0",
 ]
 
 [tool.pytest.ini_options]
@@ -31,5 +32,5 @@ markers = [
 addopts = "-m 'not integration'"
 
 [build-system]
-requires = ["uv_build>=0.9.16,<0.10.0"]
+requires = ["uv_build>=0.9.16,<0.12.0"]
 build-backend = "uv_build"
