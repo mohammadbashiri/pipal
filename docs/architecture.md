@@ -17,10 +17,9 @@ Non-goals (current):
 ┌─────────────────────────────────────────────┐
 │                   pipal                      │
 │                                              │
-│  CLI (agent, team, topic, task management)   │
+│  CLI (agent, team, topic management)         │
 │  Team TUI (visible multi-agent delegation)   │
 │  Server (HTTP/WS via FastAPI)                │
-│  Daemon (background task scheduler)          │
 │                                              │
 │  ┌────────────────────────────────────────┐  │
 │  │          Agent (~/.pipal/agents/X)     │  │
@@ -33,7 +32,6 @@ Non-goals (current):
 │  │  llm.json     - provider + model       │  │
 │  │  topics/      - persistent topic data   │  │
 │  │    X/sessions - native pi JSONL files   │  │
-│  │  tasks/       - scheduled tasks         │  │
 │  └────────────────────────────────────────┘  │
 │                      │                       │
 │                      ▼                       │
@@ -132,26 +130,6 @@ A team is a human-owned group of registered Pipal agents. It reuses topics as th
 `pipal team chat <team> --topic <topic>` uses Pi's terminal shell with Pipal's `team_chat.ts` room extension, but no agent owns the host session. Pipal owns input dispatch, deterministic `@` routing, the roster, activity state, rendering, and the canonical append-only `transcript.jsonl`. Every participant—including the manager—runs in an isolated native Pi session with its own persona, model, tools, and history. Agents know how to inspect the shared transcript lazily when a request requires prior room context. Unaddressed messages default to the manager; explicit mentions bypass it.
 
 The current implementation has a flat roster with a manager role and deterministic mention routing. The roster is also available from normal primary-agent chat as a delegation resource; a dedicated room is therefore an optional visible collaboration surface rather than the required way to use a team. See [teams.md](teams.md).
-
-## Tasks and daemon
-
-Tasks are markdown files with YAML frontmatter stored under `tasks/` (per-agent or global under `~/.pipal/tasks/`):
-
-```yaml
----
-id: daily-check
-title: Daily Check
-status: open
-assigned_to: "momo"
-schedule: "every 1d"
----
-
-# Task
-
-Check for pending items and summarize.
-```
-
-The daemon is a background process that wakes on interval, checks for due tasks, and runs them via `pipal task run`. Task results are logged in `runs.log` alongside each task.
 
 ## Server
 

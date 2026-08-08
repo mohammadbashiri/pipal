@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -210,6 +210,8 @@ function startBackgroundJob(
     message,
     acceptance_criteria: acceptanceCriteria,
     session_file: sessionFile,
+    // Terminal job.json plus .notifications markers provide durable passive
+    // completion notices across TUI closure/reopen.
     reported: false,
   }, null, 2)}\n`, "utf8");
   const worker = spawn(runtime.worker_python, ["-m", "pipal.delegation_worker", jobFile], {
@@ -635,8 +637,6 @@ export default function delegationExtension(pi: ExtensionAPI) {
   });
   pi.registerEntryRenderer("pipal-direct-error", (entry, _options, theme) =>
     new Text(theme.fg("error", `Delegation error: ${(entry.data as { text: string }).text}`), 0, 0));
-  pi.registerMessageRenderer("pipal-delegation-complete", (message, _options, theme) =>
-    new Text(theme.fg("accent", `Delegation ready for primary review: ${(message.details as any)?.delegation_id ?? ""}`), 0, 0));
   pi.registerMessageRenderer("pipal-report-request", (message, _options, theme) => {
     const details = message.details as { delegation_id?: string; report_kind?: ReportKind };
     const label = details.report_kind ? reportLabels[details.report_kind] : "Delegation report";
@@ -714,7 +714,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       watchedOffsets.set(job.id, lines.length);
     }
   };
-  const reportFinishedJobs = () => {
+  const reportFinishedJobs = (notify?: (message: string) => void) => {
     const jobs = readBackgroundJobs();
     for (const job of jobs) {
       if (job.reported || !["completed", "failed", "cancelled"].includes(job.status)) continue;
@@ -734,12 +734,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       if (fs.existsSync(marker)) continue;
       fs.mkdirSync(notificationDir, { recursive: true });
       fs.writeFileSync(marker, `${JSON.stringify({ delegation_id: id, notified_at: new Date().toISOString() })}\n`, "utf8");
-      pi.sendMessage({
-        customType: "pipal-delegation-complete",
-        content: `Background delegation ${id} has finished. You remain accountable for the outcome. Use pipal_delegation_status with job_id ${id} now, inspect every result and failure against the acceptance criteria, request any necessary corrections through the persistent agent threads, validate where practical, and report one concise completed outcome or genuine blocker to the owner.`,
-        display: true,
-        details: { delegation_id: id },
-      }, { triggerTurn: true, deliverAs: "followUp" });
+      notify?.(`Background delegation ${id} finished; use /delegations or pipal_delegation_status when you want to review it.`);
     }
   };
 
@@ -937,14 +932,18 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
       const jobs = readBackgroundJobs().filter((job) => job.id === id || job.delegation_id === id);
       if (jobs.length === 0) return ctx.ui.notify(`Unknown delegation ${id}`, "error");
       for (const job of jobs) {
-        if (job.pid && ["queued", "running"].includes(job.status)) {
-          try { process.kill(job.pid, "SIGTERM"); } catch { /* already exited */ }
+        if (!["queued", "running"].includes(job.status)) continue;
+        const jobFile = `${runtime.background_root}/${job.id}/job.json`;
+        const cancellation = spawnSync(runtime.worker_python ?? "python", ["-m", "pipal.delegation_worker", "--cancel", jobFile], {
+          cwd: runtime.working_dir,
+          encoding: "utf8",
+          env: { ...process.env },
+        });
+        if (cancellation.status !== 0) {
+          return ctx.ui.notify(`Could not cancel ${job.id}: ${(cancellation.stderr || "cancellation helper failed").trim()}`, "error");
         }
-        if (["queued", "running"].includes(job.status)) {
-          job.status = "cancelled";
-          job.error = "Cancelled by owner";
-          job.finished_at = new Date().toISOString();
-          fs.writeFileSync(`${runtime.background_root}/${job.id}/job.json`, `${JSON.stringify(job, null, 2)}\n`, "utf8");
+        if (job.pid) {
+          try { process.kill(job.pid, "SIGTERM"); } catch { /* already exited */ }
         }
       }
       ctx.ui.notify(`Cancelled ${id}`, "warning");
@@ -1071,10 +1070,11 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
 
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
-    reportFinishedJobs();
+    const notifyFinished = (message: string) => ctx.ui.notify(message, "info");
+    reportFinishedJobs(notifyFinished);
     backgroundPoller = setInterval(() => {
       reportWatchedEvents();
-      reportFinishedJobs();
+      reportFinishedJobs(notifyFinished);
     }, 1000);
     const names = new Set(runtime.delegates.map((delegate) => delegate.agent.toLowerCase()));
     ctx.ui.setEditorComponent((tui, theme, keybindings) => new DelegationEditor(

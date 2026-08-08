@@ -51,7 +51,7 @@ REMEDIATION = {
         "Update pi-coding-agent to a version that supports pipal's required CLI flags.",
     ],
     "prompt flag": [
-        "Your pi build must support `-p` or `--prompt` for one-shot task execution.",
+        "Your pi build must support `-p` or `--prompt` for one-shot agent execution.",
     ],
     "rpc mode": [
         "Your pi build must support `--mode rpc` for `pipal serve` WebSocket chat.",

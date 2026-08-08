@@ -47,13 +47,13 @@ Direct `@team:<name>` input addresses all available members. During a joined del
 
 ## Foreground and background modes
 
-Visible foreground work is the default. It keeps tool activity transparent and interruptible. When the owner explicitly asks to run a long independent task in the background, the primary can set `mode: "background"` on `pipal_delegate`. Pipal returns a durable `dg-...` job id immediately, runs the delegate in a detached worker with an isolated native session, and reports completion in the TUI even if the original TUI was closed and reopened.
+Visible foreground work is the default. It keeps tool activity transparent and interruptible. When the owner explicitly asks to run a long independent task in the background, the primary can set `mode: "background"` on `pipal_delegate`. Pipal returns a durable `dg-...` job id immediately, runs the delegate in a detached worker with an isolated native session, and shows a passive completion notice in the TUI even if the original TUI was closed and reopened.
 
 ```text
 Sasha, have Ada do this in the background.
 ```
 
-Use `/delegations` to list background jobs. When every participant finishes, Pipal wakes the primary agent with one durable completion event. The primary calls `pipal_delegation_status` for the entire delegation, reviews results and failures, requests corrections when needed, and reports one synthesized outcome. If the TUI was closed, this review starts when the topic is reopened. Background mode is never selected silently for important work.
+Use `/delegations` to list background jobs. When every participant finishes, Pipal records the result and shows one durable passive notice; it does not start an agent turn automatically. The owner can then ask the primary to review the delegation, call `pipal_delegation_status`, request corrections when needed, and report one synthesized outcome. Background mode is never selected silently for important work.
 
 Visibility is independent from execution:
 

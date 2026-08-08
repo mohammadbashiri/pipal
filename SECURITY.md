@@ -22,7 +22,7 @@ If that is unavailable, open an issue with minimal exploit detail and request a 
 Security-sensitive assets:
 - agent files (`AGENTS.md`, `IDENTITY.md`, `POLICY.md`, `USER.md`, `MEMORY.md`)
 - session history and summaries
-- task definitions and daemon behavior
+- delegation jobs, transcripts, and reports
 - provider/model configuration (`llm.json`)
 
 Primary risks:

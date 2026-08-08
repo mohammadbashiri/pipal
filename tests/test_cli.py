@@ -184,22 +184,6 @@ def test_parser_team_chat():
     assert args.topic == "insurance"
 
 
-def test_parser_task_list():
-    p = build_parser()
-    args = p.parse_args(["task", "list", "--agent", "momo"])
-    assert args.cmd == "task"
-    assert args.task_cmd == "list"
-    assert args.agent == "momo"
-
-
-def test_parser_daemon_start():
-    p = build_parser()
-    args = p.parse_args(["daemon", "start", "--agent", "momo", "--every", "30m"])
-    assert args.cmd == "daemon"
-    assert args.daemon_cmd == "start"
-    assert args.every == "30m"
-
-
 def test_parser_serve():
     p = build_parser()
     args = p.parse_args(["serve", "--port", "9000", "--read-only"])

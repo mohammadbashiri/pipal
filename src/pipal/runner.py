@@ -20,29 +20,6 @@ PERSONA_FILES = [
 
 ONBOARDING_FILE = "onboarding.md"
 
-ROUTINE_CONTEXT_FILES = [
-    "IDENTITY.md",
-    "POLICY.md",
-    "MEMORY.md",
-]
-
-def _heartbeat_files(agent: Path) -> list[Path]:
-    """Return heartbeat context files, including routine definitions."""
-    files: list[Path] = []
-
-    hb = agent / "heartbeat.md"
-    if hb.exists():
-        files.append(hb)
-
-    routines_dir = agent / "routines"
-    if routines_dir.exists():
-        files.extend(sorted(
-            p for p in routines_dir.glob("*.md") if p.is_file()
-        ))
-
-    return files
-
-
 def _find_native_pi() -> str:
     """Find the real pi-mono binary, skipping our own venv's pi wrapper."""
     # Get the venv bin dir to exclude it from search
@@ -255,17 +232,10 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
     """Invoke pi with persona context, passing through any extra CLI args."""
     # Extract Pipal flags before passing the rest to pi.
     topic_name, extra_args = _extract_topic_name(extra_args)
-    heartbeat_only = "--heartbeat-only" in extra_args
-    routine_only = "--routine-only" in extra_args
     no_session = "--no-session" in extra_args
     resume = "--resume" in extra_args or "-r" in extra_args
     continue_recent = "--continue" in extra_args or "-c" in extra_args
-    extra_args = [
-        a for a in extra_args
-        if a not in {"--heartbeat-only", "--routine-only", "--no-session"}
-    ]
-    if heartbeat_only or routine_only:
-        no_session = True
+    extra_args = [a for a in extra_args if a != "--no-session"]
 
     agent = Path(agent_path)
 
@@ -288,20 +258,15 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
             extra_args += ["--session-dir", str(sessions_dir.resolve())]
 
     # Append persona context to the system prompt (kept out of chat log)
-    if heartbeat_only:
-        system_prompt = _load_files(_heartbeat_files(agent))
-    elif routine_only:
-        system_prompt = _load_files([agent / fname for fname in ROUTINE_CONTEXT_FILES])
+    persona = load_persona(agent_path)
+    if agent_type != "kbchat" and not no_session:
+        pipal_context = build_pipal_context(agent, topic_name)
+        system_prompt = f"{pipal_context}\n\n---\n\n{persona}" if persona else pipal_context
     else:
-        persona = load_persona(agent_path)
-        if agent_type != "kbchat" and not no_session:
-            pipal_context = build_pipal_context(agent, topic_name)
-            system_prompt = f"{pipal_context}\n\n---\n\n{persona}" if persona else pipal_context
-        else:
-            system_prompt = persona
+        system_prompt = persona
 
     os.environ.pop("PIPAL_DELEGATION_RUNTIME", None)
-    if agent_type != "kbchat" and not heartbeat_only and not routine_only:
+    if agent_type != "kbchat":
         from .delegation_runtime import build_delegation_runtime
 
         _runtime, delegation_runtime_file = build_delegation_runtime(

@@ -13,6 +13,14 @@ pytestmark = pytest.mark.skipif(PI is None, reason="native pi is not installed")
 EXTENSION = Path(__file__).parents[1] / "src" / "pipal" / "extensions" / "delegation.ts"
 
 
+def test_background_completion_is_passive_and_does_not_trigger_agent_turn():
+    source = EXTENSION.read_text(encoding="utf-8")
+    completion_path = source.split("const reportFinishedJobs", 1)[1].split("pi.registerTool", 1)[0]
+    assert "notify?." in completion_path
+    assert "triggerTurn" not in completion_path
+    assert "pipal-delegation-complete" not in source
+
+
 def test_namespaced_direct_agent_message_uses_persistent_delegate(tmp_path):
     working_dir = tmp_path / "project"
     working_dir.mkdir()

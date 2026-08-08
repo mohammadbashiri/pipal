@@ -35,6 +35,11 @@ When a pipal release is cut, update this table with the exact pipal tag and the 
 - Replaced Pipal topic-management commands and server routes that previously used `session` terminology. This is a compatibility-impacting CLI and API change; see [topics.md](topics.md).
 - `pipal agent create` remains interactive when both LLM flags are omitted; `--provider` and `--model` must now be supplied together for noninteractive creation.
 - Non-loopback server binds now require an authentication token of at least 32 characters. REST and WebSocket authentication use strict Bearer headers; WebSocket query-string tokens are no longer accepted. CORS is disabled by default and supports only explicit configured HTTP(S) origins. When authentication is configured, `/health` is authenticated too. See `SECURITY.md` for browser WebSocket and reverse-proxy implications.
+- Completed background delegations now produce passive durable TUI notices instead of automatically starting a primary-agent review turn.
+
+### Removed
+
+- Removed the unfinished Markdown task format, `pipal task` commands, sleep-loop daemon, and undocumented heartbeat/routine execution flags. Durable scheduled delegation is deferred to [issue #18](https://github.com/mohammadbashiri/pipal/issues/18).
 
 ## Release checklist
 

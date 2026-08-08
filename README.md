@@ -27,7 +27,7 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 - native Pi sessions inside topics, with rolling summaries across chats
 - human-owned AI teams with visible multi-agent conversation in Pi's TUI
 - persistent direct agent messaging and outcome-owned delegation
-- optional tasks, a daemon, and a local HTTP/WS server
+- an optional local HTTP/WS server
 
 **Alpha / local-first:** pipal is designed for one person on one trusted machine. It is not a multi-tenant platform and is not hardened for the public internet. Agents run with the host user's permissions and are currently unsandboxed; treat prompts, tools, workspace files, transcripts, and reports as local data. Provider calls may incur usage charges, and `llm.json` stores the selected provider/model in plaintext (never put API keys in it). Review provider privacy, retention, and billing before delegating sensitive work.
 

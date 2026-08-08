@@ -2,29 +2,15 @@ import argparse, json, shutil, sys, subprocess
 from pathlib import Path
 from rich import print
 from rich.prompt import Confirm, Prompt
-from rich.table import Table
 from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pipal_dir, registry_path
 from .llm_config import load_llm_config
 from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
 from .team_runner import run_team_chat
 from .team_storage import create_team, list_teams, load_team, remove_team, team_dir
-from .daemon import start_daemon, stop_daemon, daemon_status, daemon_logs, parse_interval, format_interval, format_uptime
 from .topic_summary import summarize_topic
 from .topic_storage import topics_root, topic_dir, topic_sessions_dir, validate_topic_name
 from .check_pi_compatibility import run_doctor
-from .tasks import (
-    list_tasks,
-    load_task,
-    append_run_log,
-    last_run,
-    parse_task_response,
-    parse_task_message,
-    remove_task,
-    task_id_from_title,
-    task_root_global,
-    task_root_personal,
-)
 
 
 def _resolve_session_file(agent_path: str, topic_name: str, value: str) -> Path | None:
@@ -163,46 +149,6 @@ def build_parser():
         parser.add_argument("--topic", default="main", help="Topic name (default: main)")
         if command == "remove":
             parser.add_argument("--yes", action="store_true", help="Skip confirmation")
-
-    # ── task subcommands ──
-    pt = sub.add_parser("task", help="Manage tasks")
-    tsub = pt.add_subparsers(dest="task_cmd")
-
-    t_list = tsub.add_parser("list", help="List tasks")
-    t_list.add_argument("--agent", default=None, help="Agent name (list personal tasks)")
-    t_list.add_argument("--global", dest="global_only", action="store_true", help="List global tasks only")
-
-    t_run = tsub.add_parser("run", help="Run a task")
-    t_run.add_argument("task_id")
-    t_run.add_argument("--agent", default=None, help="Agent name (personal task)")
-
-    t_status = tsub.add_parser("status", help="Show task status")
-    t_status.add_argument("--agent", default=None, help="Agent name (list personal tasks)")
-    t_status.add_argument("--global", dest="global_only", action="store_true", help="Show global tasks only")
-
-    t_remove = tsub.add_parser("remove", help="Remove a task")
-    t_remove.add_argument("task_id")
-    t_remove.add_argument("--agent", default=None, help="Agent name (personal task)")
-    t_remove.add_argument("--global", dest="global_only", action="store_true", help="Remove a global task")
-
-    # ── daemon subcommands ──
-    pd = sub.add_parser("daemon", help="Manage agent daemon")
-    dsub = pd.add_subparsers(dest="daemon_cmd")
-
-    pd_start = dsub.add_parser("start", help="Start heartbeat daemon")
-    pd_start.add_argument("--agent", required=True, help="Agent name")
-    pd_start.add_argument("--every", required=True, help='Interval, e.g. "30m", "1h"')
-
-    pd_stop = dsub.add_parser("stop", help="Stop heartbeat daemon")
-    pd_stop.add_argument("--agent", required=True, help="Agent name")
-
-    pd_status = dsub.add_parser("status", help="Check daemon status")
-    pd_status.add_argument("--agent", default=None, help="Agent name")
-    pd_status.add_argument("--all", action="store_true", help="Show status for all agents")
-
-    pd_logs = dsub.add_parser("logs", help="Show daemon logs")
-    pd_logs.add_argument("--agent", required=True, help="Agent name")
-    pd_logs.add_argument("-n", type=int, default=50, help="Number of lines (default: 50)")
 
     psrv = sub.add_parser("serve", help="Run optional local pipal HTTP/WS API")
     psrv.add_argument("--host", default="127.0.0.1")
@@ -470,9 +416,6 @@ def main(argv=None):
         )
         if remove_data:
             if base.exists():
-                for agent_name, agent_path in list_agents().items():
-                    if stop_daemon(agent_path):
-                        print(f"[green]Stopped[/green] daemon for [bold]{agent_name}[/bold]")
                 shutil.rmtree(base)
                 print(f"[green]Removed[/green] {base}")
             else:
@@ -490,212 +433,6 @@ def main(argv=None):
             return result.returncode
 
         return 0
-
-    if args.cmd == "task":
-
-        if args.task_cmd == "list":
-            if args.agent and args.global_only:
-                print("[red]Use either --agent or --global, not both.[/red]")
-                return 2
-
-            entries = []
-            if args.agent:
-                agent = get_agent(args.agent)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                    return 2
-                root = task_root_personal(agent["path"])
-                tasks = list_tasks(root)
-                entries.extend(("personal", agent["name"], name, path) for name, path in tasks)
-            elif args.global_only:
-                root = task_root_global()
-                tasks = list_tasks(root)
-                entries.extend(("global", None, name, path) for name, path in tasks)
-            else:
-                tasks = list_tasks(task_root_global())
-                entries.extend(("global", None, name, path) for name, path in tasks)
-                for agent_name, agent_path in list_agents().items():
-                    tasks = list_tasks(task_root_personal(agent_path))
-                    entries.extend(("personal", agent_name, name, path) for name, path in tasks)
-
-            if not entries:
-                print("[yellow]No tasks found[/yellow]")
-                return 0
-
-            for scope, agent_name, name, path in entries:
-                scope_label = "global" if scope == "global" else f"personal({agent_name})"
-                print(f"- {name} [{scope_label}]  {path}")
-            return 0
-
-        if args.task_cmd == "run":
-            agent = None
-            if args.agent:
-                agent = get_agent(args.agent)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                    return 2
-                root = task_root_personal(agent["path"])
-            else:
-                root = task_root_global()
-
-            task_dir = root / args.task_id
-            if not task_dir.exists():
-                alt_id = task_id_from_title(args.task_id)
-                task_dir = root / alt_id
-
-            task_file = task_dir / "task.md"
-            if not task_file.exists():
-                print(f"[red]Task not found[/red] {task_file}")
-                return 2
-
-            task = load_task(task_file)
-            if not agent:
-                assigned_to = task.get("assigned_to")
-                if not assigned_to:
-                    print("[red]Task has no assigned_to. Specify --agent or set assigned_to in frontmatter.[/red]")
-                    return 2
-                agent = get_agent(assigned_to)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {assigned_to}. Run: pipal agent list")
-                    return 2
-
-            llm = load_llm_config(agent["path"])
-            if not llm:
-                print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pipal agent set-llm {agent["name"]} "provider:model"')
-                return 2
-
-            llm_run = dict(llm)
-            task_provider = task.get("provider")
-            task_model = task.get("model")
-            if task_provider:
-                llm_run["provider"] = task_provider
-            if task_model:
-                llm_run["model"] = task_model
-
-            task_content = task_file.read_text(encoding="utf-8")
-            prompt = (
-                "TASK FILE:\n"
-                "---\n"
-                f"{task_content}\n"
-                "---\n\n"
-                "Execute only the task above. Use tools/files as needed to complete it. "
-                "Reply in exactly one line using one of these formats: "
-                "TASK_OK changes=\"...\" next_steps=\"...\" or "
-                "TASK_FAIL reason=\"...\"."
-            )
-            response = run_agent_print(agent["path"], llm_run, prompt)
-            status, message = parse_task_response(response)
-            log_path = append_run_log(task_file.parent, status, message)
-
-            print(f"{status} {message}")
-            print(f"[cyan]Logged[/cyan] {log_path}")
-            return 0
-
-        if args.task_cmd == "status":
-            if args.agent and args.global_only:
-                print("[red]Use either --agent or --global, not both.[/red]")
-                return 2
-
-            entries = []
-            if args.agent:
-                agent = get_agent(args.agent)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                    return 2
-                tasks = list_tasks(task_root_personal(agent["path"]))
-                entries.extend(("personal", agent["name"], name, path) for name, path in tasks)
-            elif args.global_only:
-                tasks = list_tasks(task_root_global())
-                entries.extend(("global", None, name, path) for name, path in tasks)
-            else:
-                tasks = list_tasks(task_root_global())
-                entries.extend(("global", None, name, path) for name, path in tasks)
-                for agent_name, agent_path in list_agents().items():
-                    tasks = list_tasks(task_root_personal(agent_path))
-                    entries.extend(("personal", agent_name, name, path) for name, path in tasks)
-
-            if not entries:
-                print("[yellow]No tasks found[/yellow]")
-                return 0
-
-            table = Table(show_header=True, header_style="bold", show_lines=True)
-            table.add_column("ID", no_wrap=True)
-            table.add_column("Scope", no_wrap=True)
-            table.add_column("Title", overflow="fold")
-            table.add_column("Status", no_wrap=True)
-            table.add_column("Assigned", no_wrap=True)
-            table.add_column("Schedule", no_wrap=True)
-            table.add_column("Last Run", no_wrap=True)
-            table.add_column("Result", overflow="fold")
-
-            for scope, agent_name, name, path in entries:
-                task = load_task(path)
-                last = last_run(path.parent)
-                status = task.get("status") or "-"
-                assigned_to = task.get("assigned_to") or "-"
-                schedule = task.get("schedule") or "-"
-                title = task.get("title") or name
-                scope_label = "global" if scope == "global" else f"personal({agent_name})"
-
-                if last:
-                    parsed = parse_task_message(last["status"], last["message"])
-                    last_run_ts = last["timestamp"]
-                    if parsed["status"] == "TASK_OK":
-                        result = f"OK changes={parsed.get('changes') or '-'} next_steps={parsed.get('next_steps') or '-'}"
-                    else:
-                        result = f"FAIL reason={parsed.get('reason') or parsed.get('raw') or '-'}"
-                else:
-                    last_run_ts = "-"
-                    result = "-"
-
-                table.add_row(
-                    name,
-                    scope_label,
-                    title,
-                    status,
-                    assigned_to,
-                    schedule,
-                    last_run_ts,
-                    result,
-                )
-
-            print(table)
-            return 0
-
-        if args.task_cmd == "remove":
-            if args.agent and args.global_only:
-                print("[red]Use either --agent or --global, not both.[/red]")
-                return 2
-
-            if args.agent:
-                agent = get_agent(args.agent)
-                if not agent:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                    return 2
-                root = task_root_personal(agent["path"])
-            elif args.global_only:
-                root = task_root_global()
-            else:
-                print("[red]Specify --agent or --global to remove a task.[/red]")
-                return 2
-
-            task_dir = root / args.task_id
-            if not task_dir.exists():
-                alt_id = task_id_from_title(args.task_id)
-                task_dir = root / alt_id
-
-            if not task_dir.exists():
-                print(f"[yellow]Task not found[/yellow] {task_dir}")
-                return 0
-
-            if not Confirm.ask(f"Delete task directory {task_dir}?", default=False):
-                print("[yellow]Cancelled[/yellow]")
-                return 0
-
-            remove_task(task_dir)
-            print(f"[green]Removed[/green] {task_dir}")
-            return 0
 
     if args.cmd == "agent":
         if args.agent_cmd == "create":
@@ -758,10 +495,6 @@ def main(argv=None):
                 return 2
 
         if args.agent_cmd == "remove":
-            a = get_agent(args.name)
-            if a and stop_daemon(a["path"]):
-                print(f"[green]Stopped[/green] daemon for [bold]{args.name}[/bold]")
-
             path = rm_agent(args.name)
             if path is None:
                 print("[yellow]Not found[/yellow]")
@@ -863,91 +596,6 @@ def main(argv=None):
             written = write_llm_json(a["path"], provider, model)
             print(f"[green]Updated[/green] {written}")
             print(f"[cyan]LLM[/cyan] provider={provider} model={model}")
-            return 0
-
-    if args.cmd == "daemon":
-        if args.daemon_cmd == "start":
-            a = get_agent(args.agent)
-            if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                return 2
-            try:
-                interval = parse_interval(args.every)
-            except ValueError as e:
-                print(f"[red]{e}[/red]")
-                return 2
-            try:
-                pid = start_daemon(args.agent, a["path"], interval)
-            except RuntimeError as e:
-                print(f"[yellow]{e}[/yellow]")
-                return 1
-            except FileNotFoundError as e:
-                print(f"[red]{e}[/red]")
-                return 2
-            print(f"[green]Daemon started[/green] for [bold]{args.agent}[/bold]")
-            print(f"  PID:      {pid}")
-            print(f"  interval: {format_interval(interval)}")
-            print(f"  log:      {Path(a['path']) / 'daemon.log'}")
-            return 0
-
-        if args.daemon_cmd == "stop":
-            a = get_agent(args.agent)
-            if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                return 2
-            if stop_daemon(a["path"]):
-                print(f"[green]Stopped[/green] daemon for [bold]{args.agent}[/bold]")
-            else:
-                print(f"[yellow]No daemon running for[/yellow] {args.agent}")
-            return 0
-
-        if args.daemon_cmd == "status":
-            if args.agent and args.all:
-                print("[red]Use either --agent or --all, not both.[/red]")
-                return 2
-
-            if args.agent:
-                agents = {args.agent: get_agent(args.agent)}
-                if not agents[args.agent]:
-                    print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                    return 2
-            else:
-                agents = list_agents()
-                if not agents:
-                    print("[yellow]No agents registered[/yellow]")
-                    return 0
-
-            for name, path in agents.items():
-                a_path = path if isinstance(path, str) else path.get("path")
-                if not a_path:
-                    continue
-                st = daemon_status(a_path)
-                if not st:
-                    print(f"{name} daemon: [yellow]stopped[/yellow]")
-                    continue
-                print(f"{name} daemon: [green]running[/green]")
-                print(f"  PID:            {st['pid']}")
-                if st.get('started_at'):
-                    print(f"  uptime:         {format_uptime(st['started_at'])}")
-                if st.get('interval'):
-                    print(f"  interval:       {format_interval(st['interval'])}")
-                if st.get('last_heartbeat'):
-                    print(f"  last heartbeat: {st['last_heartbeat']}")
-                else:
-                    print(f"  last heartbeat: (none yet)")
-                print(f"  log:            {st['log']}")
-            return 0
-
-        if args.daemon_cmd == "logs":
-            a = get_agent(args.agent)
-            if not a:
-                print(f"[red]Unknown agent[/red] {args.agent}. Run: pipal agent list")
-                return 2
-            output = daemon_logs(a["path"], lines=args.n)
-            if output:
-                print(output)
-            else:
-                print("[yellow]No logs yet[/yellow]")
             return 0
 
     print("[yellow]Tip:[/yellow] use `pipal agent ...`")
