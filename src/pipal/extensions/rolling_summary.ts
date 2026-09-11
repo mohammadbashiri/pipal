@@ -24,12 +24,18 @@ const SUMMARY_FILE_NAME = "summary.md";
 export const shouldInitializeSummarySession = (reason: string) => reason !== "reload";
 export const shouldSummarizeOnShutdown = (reason: string) => reason === "quit";
 
-export const confirmSummaryOnExit = (question: string): boolean => {
+export const confirmSummaryOnExit = (
+  question: string,
+  readInput: (buffer: Buffer) => number = (buffer) =>
+    fs.readSync(process.stdin.fd, buffer, 0, buffer.length, null),
+  waitForInput: () => void = () =>
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25),
+): boolean => {
   process.stdout.write(`\n${question} [y/n]: `);
   const input = Buffer.alloc(1024);
-  try {
-    while (true) {
-      const bytesRead = fs.readSync(process.stdin.fd, input, 0, input.length, null);
+  while (true) {
+    try {
+      const bytesRead = readInput(input);
       if (bytesRead === 0) return false;
 
       const answer = input.subarray(0, bytesRead).toString("utf8");
@@ -37,9 +43,14 @@ export const confirmSummaryOnExit = (question: string): boolean => {
         if (char === "y" || char === "Y") return true;
         if (char === "n" || char === "N") return false;
       }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EAGAIN" || code === "EWOULDBLOCK" || code === "EINTR") {
+        waitForInput();
+        continue;
+      }
+      return false;
     }
-  } catch {
-    return false;
   }
 };
 

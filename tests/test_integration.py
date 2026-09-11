@@ -245,6 +245,30 @@ class TestRunnerHelpers:
         )
         assert accepted.returncode == 0, accepted.stderr
 
+        retry_script = f"""
+            import {{ confirmSummaryOnExit }} from {json.dumps(extension.as_uri())};
+            let reads = 0;
+            let waits = 0;
+            const confirmed = confirmSummaryOnExit(
+                "Retry prompt",
+                (buffer) => {{
+                    reads += 1;
+                    if (reads < 3) throw Object.assign(new Error("not ready"), {{ code: "EAGAIN" }});
+                    buffer.write("y");
+                    return 1;
+                }},
+                () => {{ waits += 1; }},
+            );
+            if (!confirmed || reads !== 3 || waits !== 2) process.exit(5);
+        """
+        retried = subprocess.run(
+            ["node", "--experimental-strip-types", "--input-type=module", "--eval", retry_script],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert retried.returncode == 0, retried.stderr
+
 
 # ── persona loading integration ──────────────────────────────────
 
