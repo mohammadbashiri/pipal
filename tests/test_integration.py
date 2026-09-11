@@ -234,7 +234,7 @@ class TestRunnerHelpers:
             text=True,
         )
         assert declined.returncode == 4, declined.stderr
-        assert "Visible prompt [y/N]:" in declined.stdout
+        assert "Visible prompt [y/n]:" in declined.stdout
 
         accepted = subprocess.run(
             ["node", "--experimental-strip-types", "--input-type=module", "--eval", confirmation_script],

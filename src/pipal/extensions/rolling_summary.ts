@@ -25,12 +25,19 @@ export const shouldInitializeSummarySession = (reason: string) => reason !== "re
 export const shouldSummarizeOnShutdown = (reason: string) => reason === "quit";
 
 export const confirmSummaryOnExit = (question: string): boolean => {
-  process.stdout.write(`\n${question} [y/N]: `);
+  process.stdout.write(`\n${question} [y/n]: `);
   const input = Buffer.alloc(1024);
   try {
-    const bytesRead = fs.readSync(process.stdin.fd, input, 0, input.length, null);
-    if (bytesRead === 0) return false;
-    return input.subarray(0, bytesRead).toString("utf8").trim().toLowerCase() === "y";
+    while (true) {
+      const bytesRead = fs.readSync(process.stdin.fd, input, 0, input.length, null);
+      if (bytesRead === 0) return false;
+
+      const answer = input.subarray(0, bytesRead).toString("utf8");
+      for (const char of answer) {
+        if (char === "y" || char === "Y") return true;
+        if (char === "n" || char === "N") return false;
+      }
+    }
   } catch {
     return false;
   }
