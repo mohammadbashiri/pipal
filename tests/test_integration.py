@@ -205,6 +205,23 @@ class TestRunnerHelpers:
         assert any("kbchat_greet" in str(p) for p in paths)
         assert not any("auto_greet" in str(p) for p in paths)
 
+    def test_rolling_summary_lifecycle_policy(self):
+        extension = next(path for path in _extension_paths(None) if path.name == "rolling_summary.ts")
+        script = f"""
+            import {{ shouldInitializeSummarySession, shouldSummarizeOnShutdown }} from {json.dumps(extension.as_uri())};
+            const reasons = ["quit", "reload", "new", "resume", "fork"];
+            if (reasons.filter(shouldSummarizeOnShutdown).join() !== "quit") process.exit(1);
+            if (shouldInitializeSummarySession("reload")) process.exit(2);
+            if (!shouldInitializeSummarySession("startup")) process.exit(3);
+        """
+        result = subprocess.run(
+            ["node", "--experimental-strip-types", "--input-type=module", "--eval", script],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
 
 # ── persona loading integration ──────────────────────────────────
 

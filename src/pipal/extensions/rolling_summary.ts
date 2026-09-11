@@ -21,6 +21,9 @@ type SessionEntry = {
 
 const SUMMARY_FILE_NAME = "summary.md";
 
+export const shouldInitializeSummarySession = (reason: string) => reason !== "reload";
+export const shouldSummarizeOnShutdown = (reason: string) => reason === "quit";
+
 const extractTextParts = (content: unknown): string[] => {
   if (typeof content === "string") return [content];
   if (!Array.isArray(content)) return [];
@@ -302,50 +305,6 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  const rawConfirm = (question: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      process.stdout.write(`\r\n${question} [y/N]: `);
-
-      let finished = false;
-      const wasRaw = (process.stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw ?? false;
-
-      const cleanup = () => {
-        process.stdin.removeListener("data", onData);
-        try {
-          if (!wasRaw) (process.stdin as NodeJS.ReadStream).setRawMode(false);
-          process.stdin.pause();
-        } catch {
-          // ignore
-        }
-      };
-
-      const finish = (answer: boolean) => {
-        if (finished) return;
-        finished = true;
-        process.stdout.write(`${answer ? "y" : "N"}\r\n`);
-        clearTimeout(timer);
-        cleanup();
-        resolve(answer);
-      };
-
-      const onData = (chunk: Buffer | string) => {
-        const first = chunk.toString("utf8")[0] ?? "";
-        finish(first === "y" || first === "Y");
-      };
-
-      const timer = setTimeout(() => finish(false), 15000);
-
-      try {
-        (process.stdin as NodeJS.ReadStream).setRawMode(true);
-        process.stdin.resume();
-        process.stdin.on("data", onData);
-      } catch {
-        clearTimeout(timer);
-        resolve(false);
-      }
-    });
-  };
-
   const handleSummaryOnExit = async (ctx: ExtensionContext) => {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const summaryPath = resolveSummaryPath(sessionFile);
@@ -358,13 +317,17 @@ export default function (pi: ExtensionAPI) {
         (entry.message?.role === "user" || entry.message?.role === "assistant")
       );
 
-    if (!ctx.hasUI || !hasMessages) {
+    if (ctx.mode !== "tui" || !hasMessages) {
       await writeSummary(ctx);
       return;
     }
 
     const summaryLocation = summaryPath ? ` and append to ${summaryPath}` : "";
-    const confirmed = await rawConfirm(`Have the agent summarize this chat${summaryLocation}?`);
+    const confirmed = await ctx.ui.confirm(
+      "Update rolling summary?",
+      `Have the agent summarize this chat${summaryLocation}?`,
+      { timeout: 15000 },
+    );
 
     if (!confirmed) {
       if (summaryPath) {
@@ -376,8 +339,10 @@ export default function (pi: ExtensionAPI) {
     await writeSummary(ctx);
   };
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     summarizedThisSession = false;
+    if (!shouldInitializeSummarySession(event.reason)) return;
+
     const sessionFile = ctx.sessionManager.getSessionFile();
     const summaryPath = resolveSummaryPath(sessionFile);
     if (!summaryPath) return;
@@ -400,8 +365,8 @@ export default function (pi: ExtensionAPI) {
     );
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
-    if (summarizedThisSession) return;
+  pi.on("session_shutdown", async (event, ctx) => {
+    if (!shouldSummarizeOnShutdown(event.reason) || summarizedThisSession) return;
     await handleSummaryOnExit(ctx);
   });
 
