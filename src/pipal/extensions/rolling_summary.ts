@@ -24,6 +24,18 @@ const SUMMARY_FILE_NAME = "summary.md";
 export const shouldInitializeSummarySession = (reason: string) => reason !== "reload";
 export const shouldSummarizeOnShutdown = (reason: string) => reason === "quit";
 
+export const confirmSummaryOnExit = (question: string): boolean => {
+  process.stdout.write(`\n${question} [y/N]: `);
+  const input = Buffer.alloc(1024);
+  try {
+    const bytesRead = fs.readSync(process.stdin.fd, input, 0, input.length, null);
+    if (bytesRead === 0) return false;
+    return input.subarray(0, bytesRead).toString("utf8").trim().toLowerCase() === "y";
+  } catch {
+    return false;
+  }
+};
+
 const extractTextParts = (content: unknown): string[] => {
   if (typeof content === "string") return [content];
   if (!Array.isArray(content)) return [];
@@ -323,10 +335,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     const summaryLocation = summaryPath ? ` and append to ${summaryPath}` : "";
-    const confirmed = await ctx.ui.confirm(
-      "Update rolling summary?",
+    const confirmed = await confirmSummaryOnExit(
       `Have the agent summarize this chat${summaryLocation}?`,
-      { timeout: 15000 },
     );
 
     if (!confirmed) {

@@ -222,6 +222,29 @@ class TestRunnerHelpers:
         )
         assert result.returncode == 0, result.stderr
 
+        confirmation_script = f"""
+            import {{ confirmSummaryOnExit }} from {json.dumps(extension.as_uri())};
+            process.exit(confirmSummaryOnExit("Visible prompt") ? 0 : 4);
+        """
+        declined = subprocess.run(
+            ["node", "--experimental-strip-types", "--input-type=module", "--eval", confirmation_script],
+            input="n\n",
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert declined.returncode == 4, declined.stderr
+        assert "Visible prompt [y/N]:" in declined.stdout
+
+        accepted = subprocess.run(
+            ["node", "--experimental-strip-types", "--input-type=module", "--eval", confirmation_script],
+            input="y\n",
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert accepted.returncode == 0, accepted.stderr
+
 
 # ── persona loading integration ──────────────────────────────────
 
