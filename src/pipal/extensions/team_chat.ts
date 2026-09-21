@@ -33,9 +33,11 @@ interface RuntimeMember {
 }
 
 interface TeamRuntime {
+  kind?: "team" | "channel";
+  channel?: string;
   team: string;
   owner: string;
-  manager: string;
+  manager?: string;
   topic: string;
   topic_dir: string;
   transcript_file: string;
@@ -202,6 +204,7 @@ function runMember(
     let outputTokens = 0;
     let cost = 0;
     let status = "thinking";
+    let modelError = "";
     const tools: MemberToolRun[] = [];
 
     const snapshot = (exitCode = -1): MemberResult => ({
@@ -276,7 +279,14 @@ function runMember(
         inputTokens += usage?.input ?? 0;
         outputTokens += usage?.output ?? 0;
         cost += usage?.cost?.total ?? 0;
-        status = "responding";
+        // Pi can exit successfully even when the model request itself failed.
+        // Treat that as a failed member run rather than publishing "(no response)".
+        if (event.message.stopReason === "error" || event.message.errorMessage) {
+          modelError = String(event.message.errorMessage || "The model returned an error without details.");
+          status = "failed";
+        } else {
+          status = "responding";
+        }
         onProgress(snapshot());
       }
     };
@@ -314,6 +324,10 @@ function runMember(
       const exitCode = code ?? 1;
       if (timedOut) {
         reject(new Error(`@${member.agent} timed out after ${timeoutSeconds}s`));
+        return;
+      }
+      if (modelError) {
+        reject(new Error(`@${member.agent} failed: ${modelError}`));
         return;
       }
       if (aborted) {
@@ -491,7 +505,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     const seen = new Set<string>();
     for (const match of text.matchAll(/@([\w.-]+)/g)) {
       const name = match[1].toLowerCase();
-      const candidates = name === "team"
+      const candidates = name === "team" || (runtime.kind === "channel" && (name === "channel" || name === "all"))
         ? runtime.members
         : ([byName.get(name)].filter(Boolean) as RuntimeMember[]);
       for (const member of candidates) {
@@ -582,7 +596,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     let wholeTeam = false;
     for (const match of text.matchAll(/@([\w.-]+)/g)) {
       const name = match[1].toLowerCase();
-      if (name === "team") {
+      if (name === "team" || (runtime.kind === "channel" && (name === "channel" || name === "all"))) {
         wholeTeam = true;
         continue;
       }
@@ -596,11 +610,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       ? runtime.members
       : mentioned.length > 0
         ? mentioned
-        : manager ? [manager] : [];
-    if (targets.length === 0) {
-      ctx.ui.notify("This team has no available agents", "error");
-      return { action: "handled" };
-    }
+        : runtime.kind === "channel" ? [] : manager ? [manager] : [];
 
     appendTranscript(runtime, {
       type: "message",
@@ -609,6 +619,12 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       content: text,
     });
     pi.appendEntry("pipal-team-owner", { owner: runtime.owner, text });
+    // In a channel an unmentioned message is for the human conversation, not
+    // an implicit request for an agent turn. Mention @agent or @team to act.
+    if (targets.length === 0) {
+      if (runtime.kind !== "channel") ctx.ui.notify("This team has no available agents", "error");
+      return { action: "handled" };
+    }
 
     currentRoomAbort?.abort();
     const roomAbort = new AbortController();
@@ -692,7 +708,7 @@ export default function teamChatExtension(pi: ExtensionAPI) {
       working_dir: runtime.working_dir,
     });
     ctx.ui.setTitle(`pipal · ${runtime.team} · ${runtime.topic}`);
-    const mentionNames = new Set(["team", ...runtime.members.map((item) => item.agent.toLowerCase())]);
+    const mentionNames = new Set(["team", ...(runtime.kind === "channel" ? ["channel", "all"] : []), ...runtime.members.map((item) => item.agent.toLowerCase())]);
     ctx.ui.setEditorComponent((tui, theme, keybindings) =>
       new TeamEditor(tui, theme, keybindings, mentionNames, () => {
         if (!currentRoomAbort) return false;
@@ -705,11 +721,11 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     ctx.ui.setHeader((_tui, theme) => ({
       render(width: number) {
         const lines = [
-          theme.fg("accent", theme.bold(`PIPAL TEAM  ${runtime.team}`)),
+          theme.fg("accent", theme.bold(`${runtime.kind === "channel" ? "PIPAL CHANNEL" : "PIPAL TEAM"}  ${runtime.channel ?? runtime.team}`)),
           theme.fg("muted", `topic: ${runtime.topic}`),
           theme.fg("muted", `working directory: ${runtime.working_dir}`),
           theme.fg("muted", `owner: ${runtime.owner}`),
-          theme.fg("muted", `manager: @${runtime.manager}`),
+          ...(runtime.manager ? [theme.fg("muted", `manager: @${runtime.manager}`)] : []),
           ...runtime.members
             .filter((item) => item.agent !== runtime.manager)
             .map((item) => theme.fg("muted", `${item.role}: @${item.agent}`)),
@@ -726,7 +742,13 @@ export default function teamChatExtension(pi: ExtensionAPI) {
         if (!match) return current.getSuggestions(lines, line, col, options);
         const query = (match[1] ?? "").toLowerCase();
         const candidates = [
-          { value: "@team", label: "@team", description: "Address the whole team" },
+          ...(runtime.kind === "channel"
+            ? [
+                { value: "@channel", label: "@channel", description: "Address every channel member" },
+                { value: "@all", label: "@all", description: "Address every channel member" },
+                { value: "@team", label: "@team", description: "Legacy alias for everyone" },
+              ]
+            : [{ value: "@team", label: "@team", description: "Address the whole team" }]),
           ...runtime.members.map((item) => ({
             value: `@${item.agent}`,
             label: `@${item.agent}`,

@@ -25,7 +25,7 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 - identity, memory, and policy files for each agent
 - topics that persist independently of the working directory
 - native Pi sessions inside topics, with rolling summaries across chats
-- human-owned AI teams with visible multi-agent conversation in Pi's TUI
+- human-owned AI teams and channel-style shared multi-agent conversations in Pi's TUI
 - persistent direct agent messaging and outcome-owned delegation
 - an optional local HTTP/WS server
 
@@ -80,7 +80,14 @@ Have product-team evaluate this in parallel and give me one synthesis.
 
 Use `/watch <dg-id>`, `/join <dg-id>`, and `/detach` to control visibility of background work. `/brief <dg-id>`, `/review <dg-id>`, and `/audit <dg-id>` provide durable executive, attributed decision-review, and full evidence-trace reports. Dedicated visible rooms remain available with `pipal team chat product-team --topic planning`.
 
-See [Pipal teams](docs/teams.md) and [persistent delegation](docs/delegation.md) for direct messaging, outcome-owned delegation, background jobs, durable reports, and the accountable primary-agent review flow. Delegation results are claims until the primary verifies them; `/brief`, `/review`, and `/audit` expose progressively more reporting detail.
+For a flat shared room—where agents act only when mentioned—create a channel:
+
+```bash
+pipal channel create product --member momo:Builder --member reviewer:Reviewer
+pipal channel chat product --topic planning
+```
+
+See [Pipal channels](docs/channels.md), [Pipal teams](docs/teams.md), and [persistent delegation](docs/delegation.md) for direct messaging, outcome-owned delegation, background jobs, durable reports, and the accountable primary-agent review flow. Delegation results are claims until the primary verifies them; `/brief`, `/review`, and `/audit` expose progressively more reporting detail.
 
 Docker support is **experimental**; local installation is the supported alpha path. See [Docker usage](docs/docker.md) for isolation and networking caveats.
 

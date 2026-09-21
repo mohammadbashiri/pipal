@@ -27,6 +27,10 @@ agent = Path(os.environ["PIPAL_AGENT_DIR"]).name
 prompt = sys.argv[sys.argv.index("-p") + 1]
 if "hang forever" in prompt:
     time.sleep(30)
+if "model failure" in prompt:
+    message = {"role": "assistant", "content": [], "stopReason": "error", "errorMessage": "Configured model is unavailable"}
+    print(json.dumps({"type": "message_end", "message": message}), flush=True)
+    sys.exit(0)
 if agent == "raven":
     if "The agents you addressed replied:" in prompt:
         text = "Ada answered 4; I agree."
@@ -165,6 +169,18 @@ def test_pipal_owned_room_routes_mentions_records_tools_and_uses_shared_cwd(tmp_
     assert tool_results[0]["output"] == runtime["working_dir"]
 
 
+def test_team_room_persists_model_failure_instead_of_no_response(tmp_path):
+    _runtime_data, runtime_file = _runtime(tmp_path)
+    events = _run_rpc(
+        runtime_file,
+        "@ada model failure",
+        lambda items: any(item.get("type") == "error" for item in items),
+    )
+    error = next(item for item in events if item.get("type") == "error")
+    assert "@ada failed: Configured model is unavailable" in error["content"]
+    assert not any(item.get("content") == "(no response)" for item in events)
+
+
 def test_team_room_persists_agent_timeout_as_error(tmp_path):
     _runtime_data, runtime_file = _runtime(tmp_path, timeout=1)
     events = _run_rpc(
@@ -174,6 +190,35 @@ def test_team_room_persists_agent_timeout_as_error(tmp_path):
     )
     error = next(item for item in events if item.get("type") == "error")
     assert "timed out after 1s" in error["content"]
+
+
+def test_channel_records_unmentioned_messages_without_running_agents(tmp_path):
+    runtime, runtime_file = _runtime(tmp_path)
+    runtime["kind"] = "channel"
+    runtime.pop("manager")
+    runtime_file.write_text(json.dumps(runtime), encoding="utf-8")
+    events = _run_rpc(
+        runtime_file,
+        "I am thinking out loud.",
+        lambda items: any(item.get("type") == "message" for item in items),
+    )
+    messages = [item for item in events if item.get("type") == "message"]
+    assert [(item["author"]["name"], item["content"]) for item in messages] == [
+        ("Mo", "I am thinking out loud."),
+    ]
+
+
+def test_channel_aliases_fan_out_to_every_member(tmp_path):
+    runtime, runtime_file = _runtime(tmp_path)
+    runtime["kind"] = "channel"
+    runtime.pop("manager")
+    runtime_file.write_text(json.dumps(runtime), encoding="utf-8")
+    events = _run_rpc(
+        runtime_file,
+        "@channel give one sentence each",
+        lambda items: len([item for item in items if item.get("type") == "message"]) >= 4,
+    )
+    assert {item["author"]["name"] for item in events if item.get("type") == "message"} == {"Mo", "sasha", "ada", "raven"}
 
 
 def test_team_room_command_cancels_active_agent(tmp_path):

@@ -8,6 +8,8 @@ from .agent_scaffold import ensure_agent_scaffold, write_llm_json
 from .runner import run_agent, run_agent_print
 from .team_runner import run_team_chat
 from .team_storage import create_team, list_teams, load_team, remove_team, team_dir
+from .channel_runner import run_channel_chat
+from .channel_storage import create_channel, list_channels, load_channel, remove_channel, channel_dir
 from .topic_summary import summarize_topic
 from .topic_storage import topics_root, topic_dir, topic_sessions_dir, validate_topic_name
 from .check_pi_compatibility import run_doctor
@@ -115,6 +117,19 @@ def build_parser():
     team_remove = team_sub.add_parser("remove", help="Remove a team and its shared topics")
     team_remove.add_argument("name")
     team_remove.add_argument("--yes", action="store_true", help="Skip confirmation")
+
+    # ── channel subcommands ──
+    pchannel = sub.add_parser("channel", help="Create and chat in shared multi-agent channels")
+    channel_sub = pchannel.add_subparsers(dest="channel_cmd")
+    channel_create = channel_sub.add_parser("create", help="Create a shared channel from registered agents")
+    channel_create.add_argument("name")
+    channel_create.add_argument("--member", action="append", default=[], metavar="AGENT:ROLE", help="Add an agent member; repeat for multiple members")
+    channel_create.add_argument("--owner", default="Mo", help="Human owner display name (default: Mo)")
+    channel_create.add_argument("--max-rounds", type=int, default=4, help="Agent mention round budget")
+    channel_sub.add_parser("list", help="List channels")
+    channel_show = channel_sub.add_parser("show", help="Show channel configuration"); channel_show.add_argument("name")
+    channel_chat = channel_sub.add_parser("chat", help="Open a shared multi-agent channel"); channel_chat.add_argument("name"); channel_chat.add_argument("--topic", default="main"); channel_chat.add_argument("--new-session", action="store_true")
+    channel_remove = channel_sub.add_parser("remove", help="Remove a channel and its history"); channel_remove.add_argument("name"); channel_remove.add_argument("--yes", action="store_true")
 
     # ── topic subcommands ──
     ptopic = sub.add_parser("topic", help="Manage persistent Pipal topics")
@@ -294,6 +309,41 @@ def main(argv=None):
             remove_team(team["name"])
             print(f"[green]Removed[/green] team {team['name']}")
             return 0
+
+    if args.cmd == "channel":
+        if args.channel_cmd == "create":
+            try:
+                members = [parse_team_member_spec(value) for value in args.member]
+            except ValueError as exc:
+                print(f"[red]{exc}[/red]"); return 2
+            unknown = sorted({agent for agent, _role in members if not get_agent(agent)})
+            if unknown:
+                print(f"[red]Unknown channel agent(s)[/red] {', '.join(unknown)}. Run: pipal agent list"); return 2
+            try:
+                channel = create_channel(args.name, members, owner=args.owner, max_rounds=args.max_rounds)
+            except ValueError as exc:
+                print(f"[red]{exc}[/red]"); return 2
+            print(f"[green]Created[/green] channel [bold]#{channel['name']}[/bold]")
+            print(f"[cyan]Owner[/cyan] {channel['owner']}")
+            for member in channel['members']: print(f"- @{member['agent']}  {member['role']}")
+            return 0
+        if args.channel_cmd == "list":
+            for channel in list_channels(): print(f"- [bold]#{channel.get('name', '-')}[/bold]  members={len(channel.get('members', []))}")
+            return 0
+        channel = load_channel(getattr(args, "name", ""))
+        if not channel:
+            print(f"[red]Unknown channel[/red] {getattr(args, 'name', '')}. Run: pipal channel list"); return 2
+        if args.channel_cmd == "show":
+            print(f"[bold]#{channel['name']}[/bold]"); print(f"Owner: {channel.get('owner', '-')}"); print('Members:')
+            for member in channel.get('members', []): print(f"- @{member.get('agent', '-')}  {member.get('role', 'Member')}")
+            print(f"Path: {channel_dir(channel['name'])}"); return 0
+        if args.channel_cmd == "chat":
+            try: run_channel_chat(channel, args.topic, new_session=args.new_session)
+            except (ValueError, FileNotFoundError) as exc: print(f"[red]{exc}[/red]"); return 2
+            return 0
+        if args.channel_cmd == "remove":
+            if not args.yes and not Confirm.ask(f"Delete channel #{channel['name']} and all shared history?", default=False): print("[yellow]Cancelled[/yellow]"); return 0
+            remove_channel(channel['name']); print(f"[green]Removed[/green] channel #{channel['name']}"); return 0
 
     if args.cmd == "topic":
         agent = get_agent(args.agent)
