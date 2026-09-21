@@ -36,6 +36,15 @@ def _reply(base: str, token: str, channel_id: str, text: str) -> None:
     _request(base, f"/api/channels/{channel_id}/messages", token, "POST", {"body": text})
 
 
+def _typing(base: str, token: str, workspace_id: str, channel_id: str, turn_id: str, started: bool) -> None:
+    _request(base, "/api/realtime/ephemeral", token, "POST", {
+        "workspace_id": workspace_id,
+        "channel_id": channel_id,
+        "type": "typing.started" if started else "typing.stopped",
+        "payload": {"turn_id": turn_id},
+    })
+
+
 def run_clickclack_bridge(config_path: Path) -> None:
     from websockets.sync.client import connect
 
@@ -83,8 +92,13 @@ The message directed to you is:
 {text}
 
 Reply directly and concisely. Do not claim to have read context not included above."""
-                        answer = run_agent_print(agent["path"], llm, prompt).strip()
-                        _reply(base, target["token"], event["channel_id"], answer or "I could not produce a response.")
+                        turn_id = event["payload"]["message_id"]
+                        _typing(base, target["token"], workspace, event["channel_id"], turn_id, True)
+                        try:
+                            answer = run_agent_print(agent["path"], llm, prompt).strip()
+                            _reply(base, target["token"], event["channel_id"], answer or "I could not produce a response.")
+                        finally:
+                            _typing(base, target["token"], workspace, event["channel_id"], turn_id, False)
         except Exception as exc:
             print(f"ClickClack connection closed ({exc}); retrying in 2s.")
             time.sleep(2)
