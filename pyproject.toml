@@ -13,6 +13,7 @@ dependencies = [
     "rich>=14.3.3",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "websockets>=16.0",
 ]
 
 [project.scripts]

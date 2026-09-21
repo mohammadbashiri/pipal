@@ -131,6 +131,14 @@ def build_parser():
     channel_chat = channel_sub.add_parser("chat", help="Open a shared multi-agent channel"); channel_chat.add_argument("name"); channel_chat.add_argument("--topic", default="main"); channel_chat.add_argument("--new-session", action="store_true")
     channel_remove = channel_sub.add_parser("remove", help="Remove a channel and its history"); channel_remove.add_argument("name"); channel_remove.add_argument("--yes", action="store_true")
 
+    # ── optional integrations ──
+    pintegration = sub.add_parser("integration", help="Run optional external chat integrations")
+    integration_sub = pintegration.add_subparsers(dest="integration_cmd")
+    clickclack = integration_sub.add_parser("clickclack", help="Connect ClickClack bots to Pipal agents")
+    clickclack_sub = clickclack.add_subparsers(dest="clickclack_cmd")
+    clickclack_run = clickclack_sub.add_parser("run", help="Run the local ClickClack bridge")
+    clickclack_run.add_argument("--config", type=Path, default=Path.home() / ".pipal" / "integrations" / "clickclack.json")
+
     # ── topic subcommands ──
     ptopic = sub.add_parser("topic", help="Manage persistent Pipal topics")
     topic_sub = ptopic.add_subparsers(dest="topic_cmd")
@@ -344,6 +352,17 @@ def main(argv=None):
         if args.channel_cmd == "remove":
             if not args.yes and not Confirm.ask(f"Delete channel #{channel['name']} and all shared history?", default=False): print("[yellow]Cancelled[/yellow]"); return 0
             remove_channel(channel['name']); print(f"[green]Removed[/green] channel #{channel['name']}"); return 0
+
+    if args.cmd == "integration":
+        if args.integration_cmd == "clickclack" and args.clickclack_cmd == "run":
+            from .clickclack_bridge import run_clickclack_bridge
+            if not args.config.is_file():
+                print(f"[red]ClickClack configuration not found[/red] {args.config}"); return 2
+            try:
+                run_clickclack_bridge(args.config)
+            except KeyboardInterrupt:
+                print("\n[dim]ClickClack bridge stopped[/dim]")
+            return 0
 
     if args.cmd == "topic":
         agent = get_agent(args.agent)
