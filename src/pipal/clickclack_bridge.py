@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -73,7 +74,13 @@ def run_clickclack_bridge(config_path: Path) -> None:
                     if event.get("type") != "message.created" or not event.get("channel_id"):
                         continue
                     author = event.get("payload", {}).get("author_id")
-                    for target in [bots[item] for item in event.get("mentioned_user_ids", []) if item in bots]:
+                    targets = [bots[item] for item in event.get("mentioned_user_ids", []) if item in bots]
+                    # ClickClack resolves named bot mentions; these are Pipal
+                    # channel conveniences that fan out to all mapped bot users.
+                    message_body = _request(base, f"/api/messages/{event['payload']['message_id']}", poll_token)["message"].get("body", "")
+                    if re.search(r"(?<!\w)@(all|channel)\b", message_body, re.IGNORECASE):
+                        targets = list(bots.values())
+                    for target in targets:
                         if author == target["bot_user_id"]:
                             continue
                         text, history = _context_packet(base, target["token"], event["channel_id"], event["payload"]["message_id"])
