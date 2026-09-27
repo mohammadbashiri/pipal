@@ -87,7 +87,7 @@ pipal channel create product --member momo:Builder --member reviewer:Reviewer
 pipal channel chat product --topic planning
 ```
 
-See [Pipal channels](docs/channels.md), [Pipal teams](docs/teams.md), and [persistent delegation](docs/delegation.md) for direct messaging, outcome-owned delegation, background jobs, durable reports, and the accountable primary-agent review flow. Delegation results are claims until the primary verifies them; `/brief`, `/review`, and `/audit` expose progressively more reporting detail.
+See [Pipal channels](docs/channels.md), [Pipal teams](docs/teams.md), and [persistent delegation](docs/delegation.md) for direct messaging, outcome-owned delegation, background jobs, durable reports, and the accountable primary-agent review flow. [ClickClack integration](docs/clickclack.md) explains how to connect ClickClack bots to local Pipal agents. Delegation results are claims until the primary verifies them; `/brief`, `/review`, and `/audit` expose progressively more reporting detail.
 
 Docker support is **experimental**; local installation is the supported alpha path. See [Docker usage](docs/docker.md) for isolation and networking caveats.
 
