@@ -125,6 +125,7 @@ def build_delegation_runtime(
         "max_turns": 8,
         "background_root": str((root / "jobs").resolve()),
         "ephemeral_root": str((root / "ephemeral").resolve()),
+        "model_override_root": str((root / "model-overrides").resolve()),
         "worker_python": sys.executable,
         "delegates": delegates,
         "teams": teams,

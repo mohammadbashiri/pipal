@@ -26,6 +26,7 @@ interface DelegateRuntime {
   session_file: string;
   transcript_file: string;
   ephemeral?: boolean;
+  model_override?: boolean;
 }
 
 interface TeamRuntime {
@@ -44,6 +45,7 @@ interface DelegationRuntime {
   max_turns?: number;
   background_root?: string;
   ephemeral_root?: string;
+  model_override_root?: string;
   worker_python?: string;
   delegates: DelegateRuntime[];
   teams?: TeamRuntime[];
@@ -398,7 +400,7 @@ function ensureNoRunningBackgroundTurn(runtime: DelegationRuntime, id: string): 
   const matching = jobs.flatMap((name) => {
     try {
       const job = JSON.parse(fs.readFileSync(`${runtime.background_root}/${name}/job.json`, "utf8"));
-      return job.delegate?.ephemeral && job.delegation_id === id ? [job] : [];
+      return (job.delegate?.ephemeral || job.delegate?.model_override) && job.delegation_id === id ? [job] : [];
     } catch { return []; }
   });
   if (matching.some((job) => job.status === "queued" || job.status === "running")) {
@@ -427,6 +429,46 @@ function ephemeralDelegate(runtime: DelegationRuntime, record: EphemeralRecord, 
     session_file: session,
     transcript_file: `${dir}/transcript.jsonl`,
   };
+}
+
+interface ModelOverrideRecord {
+  delegation_id: string;
+  agent: string;
+  primary: string;
+  topic: string;
+  provider: string;
+  model: string;
+  created_at: string;
+  session_file?: string;
+}
+
+function modelOverrideDir(runtime: DelegationRuntime, id: string): string {
+  if (!runtime.model_override_root) throw new Error("Per-delegation model overrides are unavailable in this runtime");
+  if (!/^dg-[a-f0-9]{8}$/.test(id)) throw new Error("Invalid delegation id");
+  return `${runtime.model_override_root}/${id}`;
+}
+
+function loadModelOverride(runtime: DelegationRuntime, id: string): ModelOverrideRecord | undefined {
+  const file = `${modelOverrideDir(runtime, id)}/model.json`;
+  if (!fs.existsSync(file)) return undefined;
+  const record = JSON.parse(fs.readFileSync(file, "utf8")) as ModelOverrideRecord;
+  if (record.delegation_id !== id || record.primary !== runtime.primary || record.topic !== runtime.topic) {
+    throw new Error(`Invalid model override for delegation ${id}`);
+  }
+  return record;
+}
+
+function saveModelOverride(runtime: DelegationRuntime, record: ModelOverrideRecord): void {
+  const file = `${modelOverrideDir(runtime, record.delegation_id)}/model.json`;
+  const temp = `${file}.${randomUUID()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(record, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(temp, file);
+}
+
+function scopedPersistentDelegate(runtime: DelegationRuntime, base: DelegateRuntime, record: ModelOverrideRecord, session: string): DelegateRuntime {
+  const dir = modelOverrideDir(runtime, record.delegation_id);
+  return { ...base, provider: record.provider, model: record.model, model_override: true,
+    session_file: session, prompt_file: `${dir}/prompt.md`, transcript_file: `${dir}/transcript.jsonl` };
 }
 
 export default function delegationExtension(pi: ExtensionAPI) {
@@ -522,13 +564,14 @@ export default function delegationExtension(pi: ExtensionAPI) {
   if (runtime.delegates.length > 0) pi.registerTool({
     name: "pipal_delegate",
     label: "Delegate to Pipal agent",
-    description: `Hold a persistent delegation thread with another registered Pipal agent. Available: ${available}. Use repeated calls to review, correct, and finish delegated work.`,
+    description: `Hold a persistent delegation thread with a registered Pipal agent. Available: ${available}. For a new delegation, optionally select a temporary model/provider without changing the agent's saved settings; follow-ups keep that choice. Use repeated calls to review, correct, and finish delegated work.`,
     promptSnippet: "Delegate outcome-oriented work to a persistent Pipal agent",
     promptGuidelines: [
       "You own every delegated outcome. Frame the goal, context, and acceptance criteria instead of relaying the user's words.",
       "Inspect the delegate's work. Continue the same agent thread with corrections or follow-up requests until the outcome is complete or genuinely blocked.",
       "Validate claims and artifacts where practical, then report the completed result rather than merely forwarding the delegate's response.",
       "Use parallel pipal_delegate calls when independent work can safely happen concurrently.",
+      "For a one-delegation model change, set model (and optionally provider) only on the first call; follow up by delegation_id without respecifying the model. Never silently choose an expensive model.",
       "Before broad multi-agent execution, present the owner with a delegation plan covering assignments, dependencies, parallel waves, and integration responsibility; wait for explicit confirmation before launching it.",
       "After approval, launch background work in the current topic, return delegation IDs immediately, and keep the owner chat available. Never silently create or switch to another topic.",
       "Foreground is the default. Use background mode only when the owner explicitly asks, or after suggesting it for long independent work.",
@@ -543,33 +586,71 @@ export default function delegationExtension(pi: ExtensionAPI) {
         Type.Literal("background"),
       ], { description: "Foreground by default; background only when explicitly requested" })),
       delegation_id: Type.Optional(Type.String({ description: "Existing delegation id when continuing or correcting the same managed outcome" })),
+      model: Type.Optional(Type.String({ description: "Optional model override for a NEW delegation; does not change the agent's saved model" })),
+      provider: Type.Optional(Type.String({ description: "Optional provider override for a NEW delegation; requires model; defaults to the agent's provider" })),
     }),
     renderShell: "self",
     async execute(_id, params, signal, onUpdate) {
       const delegate = byName.get(params.agent.replace(/^@?agent:/, "").toLowerCase());
       if (!delegate) throw new Error(`Unknown Pipal agent ${params.agent}. Available: ${available}`);
       if (callsThisTurn >= (runtime.max_turns ?? 8)) throw new Error(`Delegation turn budget reached (${runtime.max_turns ?? 8})`);
-      callsThisTurn += 1;
+      if (params.provider && !params.model) throw new Error("A provider override requires a model");
+      if (params.model !== undefined && !params.model.trim()) throw new Error("A model override cannot be empty");
+      if (params.provider !== undefined && !params.provider.trim()) throw new Error("A provider override cannot be empty");
       const delegationId = params.delegation_id ?? `dg-${randomUUID().slice(0, 8)}`;
+      let scoped: ModelOverrideRecord | undefined;
+      if (params.delegation_id && runtime.model_override_root) scoped = loadModelOverride(runtime, delegationId);
+      if (scoped && scoped.agent !== delegate.agent) throw new Error(`Delegation ${delegationId} belongs to ${scoped.agent}, not ${delegate.agent}`);
+      if (scoped && (params.model || params.provider)) throw new Error("The delegation model is fixed; omit model/provider on follow-up or start a new delegation");
+      if (params.delegation_id && params.model && !scoped) throw new Error("Model overrides must start a new delegation; omit delegation_id");
+      if (!scoped && params.model) {
+        const dir = modelOverrideDir(runtime, delegationId);
+        fs.mkdirSync(`${dir}/sessions`, { recursive: true, mode: 0o700 });
+        const transcript = `${dir}/transcript.jsonl`;
+        fs.writeFileSync(transcript, "", { flag: "wx", mode: 0o600 });
+        const basePrompt = fs.readFileSync(delegate.prompt_file, "utf8");
+        fs.writeFileSync(`${dir}/prompt.md`, basePrompt.replaceAll(delegate.transcript_file, transcript) + "\nThis model choice applies only to this delegation, not the agent's saved settings.\n", { mode: 0o600 });
+        scoped = { delegation_id: delegationId, agent: delegate.agent, primary: runtime.primary, topic: runtime.topic,
+          provider: params.provider?.trim() || delegate.provider || "", model: params.model.trim(), created_at: new Date().toISOString() };
+        saveModelOverride(runtime, scoped);
+      }
+      if (scoped) {
+        if (activeEphemeral.has(delegationId)) throw new Error(`Delegation ${delegationId} is already active`);
+        activeEphemeral.add(delegationId);
+      }
+      try {
+      if (scoped) ensureNoRunningBackgroundTurn(runtime, delegationId);
+      const session = scoped ? `${modelOverrideDir(runtime, delegationId)}/sessions/${randomUUID()}.jsonl` : delegate.session_file;
+      if (scoped) forkEphemeralSession(scoped.session_file, session, runtime.working_dir);
+      const target = scoped ? scopedPersistentDelegate(runtime, delegate, scoped, session) : delegate;
+      callsThisTurn += 1;
       if (params.mode === "background") {
-        const background = startBackgroundJob(runtime, delegate, params.message, params.acceptance_criteria, { delegationId });
+        const background = startBackgroundJob(runtime, target, params.message, params.acceptance_criteria, { delegationId });
+        if (scoped) {
+          scoped.session_file = `${runtime.background_root}/${background.worker_job_id}/session.jsonl`;
+          saveModelOverride(runtime, scoped);
+        }
         return {
           content: [{ type: "text", text: `Background delegation ${background.job_id} assigned to @agent:${delegate.agent}. It will continue if this TUI closes.` }],
           details: background,
         };
       }
-      appendEvent(delegate, {
+      appendEvent(target, {
         type: "message",
         author: runtime.primary,
         content: params.message,
         acceptance_criteria: params.acceptance_criteria,
         delegation_id: delegationId,
       });
-      const result = await runQueued(delegate, runtime.primary, params.message, params.acceptance_criteria, signal, (partial) => {
+      const result = await runQueued(target, runtime.primary, params.message, params.acceptance_criteria, signal, (partial) => {
         onUpdate?.({ content: [{ type: "text", text: partial.text || `@agent:${delegate.agent} is ${partial.status}…` }], details: partial });
       });
+      if (scoped) {
+        scoped.session_file = session;
+        saveModelOverride(runtime, scoped);
+      }
       result.delegationId = delegationId;
-      appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: delegationId });
+      appendEvent(target, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: delegationId });
       return {
         content: [{ type: "text", text: `Delegation ${delegationId}\n\n${result.text || "(no response)"}` }],
         details: result,
@@ -582,6 +663,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.cost },
         },
       };
+      } finally { if (scoped) activeEphemeral.delete(delegationId); }
     },
     renderCall(args, theme) {
       return new Text(`${theme.fg("accent", theme.bold(`@agent:${String(args.agent).replace(/^@?agent:/, "")}`))}\n${theme.fg("dim", String(args.message ?? ""))}`, 1, 0);

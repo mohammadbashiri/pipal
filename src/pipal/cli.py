@@ -72,9 +72,9 @@ def build_parser():
 
     sub2.add_parser("list", help="List agents")
 
-    p_chat = sub2.add_parser("chat", help="Chat with an agent (interactive TUI)")
+    p_chat = sub2.add_parser("chat", help="Chat with an agent (interactive TUI); pass --model [and --provider] after the name to override for this session")
     p_chat.add_argument("name")
-    p_chat.add_argument("args", nargs=argparse.REMAINDER)
+    p_chat.add_argument("args", nargs=argparse.REMAINDER, help="Pi flags, e.g. --model gpt-5.6-terra; saved llm.json is unchanged")
 
     p_ask = sub2.add_parser("ask", help="Ask an agent (one-shot prompt)")
     p_ask.add_argument("name")

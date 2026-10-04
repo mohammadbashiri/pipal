@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from pipal import delegation_runtime
+from pipal.cli import build_parser
+from pipal.runner import _build_pi_cmd
 
 
 ESBUILD = Path("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/esbuild")
@@ -29,8 +31,17 @@ def test_runtime_exposes_ephemeral_workers_without_registered_delegates(monkeypa
     assert path.is_file()
 
 
+def test_chat_model_flags_override_only_the_session(tmp_path):
+    args = build_parser().parse_args(["agent", "chat", "reviewer", "--model", "temporary-model"])
+    assert args.args == ["--model", "temporary-model"]
+    saved = {"provider": "openai-codex", "model": "saved-model"}
+    command = _build_pi_cmd(str(tmp_path), saved, args.args, True, "main", None, include_extension=False)
+    assert command == ["pi", "--provider", "openai-codex", "--model", "saved-model", "--no-session", "--model", "temporary-model"]
+    assert saved["model"] == "saved-model"
+
+
 @pytest.mark.skipif(not shutil.which("node") or not ESBUILD.is_dir(), reason="Pi's Node/esbuild runtime unavailable")
-def test_ephemeral_worker_creation_followup_restart_and_close():
+def test_ephemeral_and_persistent_override_lifecycles():
     result = subprocess.run(
         ["node", str(HARNESS)],
         env={**os.environ, "PIPAL_ESBUILD": str(ESBUILD), "PIPAL_PYTHON": sys.executable},
@@ -39,4 +50,4 @@ def test_ephemeral_worker_creation_followup_restart_and_close():
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    assert "ephemeral lifecycle ok" in result.stdout
+    assert "ephemeral and persistent override lifecycles ok" in result.stdout

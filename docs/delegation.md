@@ -33,6 +33,12 @@ The primary owns the outcome. It should not act as a one-shot relay. It is instr
 
 Critical or external actions still require the owner's normal approval.
 
+## Temporary model choice for a registered agent
+
+`pipal_delegate` accepts optional `model` and `provider` on a **new** delegation. The provider defaults to the registered agent's configured provider. This starts a separate job-scoped native session with the agent's persona and the selected model; its corrections keep the same model when addressed by `delegation_id`. The agent's `llm.json` and normal delegation session remain unchanged. Do not pass a new model on a follow-up: start a new delegation for another model. Existing approval rules still apply to costly models and parallel work.
+
+For an interactive primary-agent TUI, `pipal agent chat <name> --model <model>` (optionally `--provider <provider>`) already passes a one-session override to Pi; it does not modify the saved `llm.json`. For example, `pipal agent chat momolty --model gpt-5.6-terra --topic research`.
+
 ## Job-scoped (ephemeral) workers
 
 For a bounded task that needs a fresh perspective or a particular provider/model, use `pipal_delegate_ephemeral`. Unlike `pipal_delegate`, this does **not** add an agent to the registry or reuse a permanent persona or model setting. The primary specifies `role`, `provider`, `model`, `instructions`, `message`, and optionally `acceptance_criteria`:
@@ -124,6 +130,11 @@ Running a report command again opens the saved version without another model cal
     prompt.md
     transcript.jsonl
     sessions/*.jsonl      # immutable turn snapshots
+  model-overrides/<dg-id>/
+    model.json            # scoped registered-agent model, original settings untouched
+    prompt.md
+    transcript.jsonl
+    sessions/*.jsonl
 ```
 
 The transcript is the durable direct/delegation thread. The delegate's native Pi session preserves private working context. Reopening the primary topic resumes the latest delegate session, forking it automatically if the launch working directory changed.
