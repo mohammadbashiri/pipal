@@ -1,0 +1,42 @@
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from pipal import delegation_runtime
+
+
+ESBUILD = Path("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/esbuild")
+HARNESS = Path(__file__).with_name("ephemeral_harness.cjs")
+
+
+def test_runtime_exposes_ephemeral_workers_without_registered_delegates(monkeypatch, tmp_path):
+    monkeypatch.setattr(delegation_runtime, "list_agents", lambda: {})
+    monkeypatch.setattr(delegation_runtime, "list_teams", lambda: [])
+    monkeypatch.setattr(delegation_runtime, "_find_native_pi", lambda: "pi")
+    primary = tmp_path / "primary"
+    primary.mkdir()
+
+    runtime, path = delegation_runtime.build_delegation_runtime(
+        "momo", str(primary), "pipal", working_dir=tmp_path
+    )
+
+    assert runtime["delegates"] == []
+    assert runtime["ephemeral_root"] == str(primary / "topics/pipal/delegations/ephemeral")
+    assert path.is_file()
+
+
+@pytest.mark.skipif(not shutil.which("node") or not ESBUILD.is_dir(), reason="Pi's Node/esbuild runtime unavailable")
+def test_ephemeral_worker_creation_followup_restart_and_close():
+    result = subprocess.run(
+        ["node", str(HARNESS)],
+        env={**os.environ, "PIPAL_ESBUILD": str(ESBUILD), "PIPAL_PYTHON": sys.executable},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ephemeral lifecycle ok" in result.stdout

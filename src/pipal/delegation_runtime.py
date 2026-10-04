@@ -124,6 +124,7 @@ def build_delegation_runtime(
         "agent_timeout_seconds": 300,
         "max_turns": 8,
         "background_root": str((root / "jobs").resolve()),
+        "ephemeral_root": str((root / "ephemeral").resolve()),
         "worker_python": sys.executable,
         "delegates": delegates,
         "teams": teams,

@@ -33,6 +33,19 @@ The primary owns the outcome. It should not act as a one-shot relay. It is instr
 
 Critical or external actions still require the owner's normal approval.
 
+## Job-scoped (ephemeral) workers
+
+For a bounded task that needs a fresh perspective or a particular provider/model, use `pipal_delegate_ephemeral`. Unlike `pipal_delegate`, this does **not** add an agent to the registry or reuse a permanent persona or model setting. The primary specifies `role`, `provider`, `model`, `instructions`, `message`, and optionally `acceptance_criteria`:
+
+```text
+Have a one-off reviewer on my configured provider/model check this change,
+then inspect its findings and request corrections if necessary.
+```
+
+The tool returns a `dg-...` delegation id. Follow up with `pipal_delegate_ephemeral` using **only** `delegation_id` and a new `message` (plus optional acceptance criteria/mode). It resumes the same worker's job-scoped context across primary-session restarts. Role, instructions, and model cannot be changed mid-job; start another job for an independent opinion. The primary can call `pipal_close_ephemeral` after review; closing rejects future turns but preserves the transcript, native sessions, background events, and reports. This is ephemeral **identity**, not ephemeral evidence.
+
+Foreground is the default. `mode: "background"` is available with explicit owner approval, using the existing background job status/watch/report infrastructure. A correction cannot start while a previous background turn is still running. Parallel independent reviews need separate ephemeral delegations and the normal approval plan for broad multi-agent work. Provider/model must be available to the native Pi installation; Pipal does not change any registered agent's configuration.
+
 ## Saved teams from normal agent chat
 
 Normal primary-agent chat is the default entry point. Saved teams are available as resource pools through `pipal_delegate_team`:
@@ -106,6 +119,11 @@ Running a report command again opens the saved version without another model cal
   <delegate>/
     transcript.jsonl
     sessions/*.jsonl
+  ephemeral/<dg-id>/
+    worker.json           # job-scoped role, model, instructions, closure status
+    prompt.md
+    transcript.jsonl
+    sessions/*.jsonl      # immutable turn snapshots
 ```
 
 The transcript is the durable direct/delegation thread. The delegate's native Pi session preserves private working context. Reopening the primary topic resumes the latest delegate session, forking it automatically if the launch working directory changed.

@@ -25,6 +25,7 @@ interface DelegateRuntime {
   prompt_file: string;
   session_file: string;
   transcript_file: string;
+  ephemeral?: boolean;
 }
 
 interface TeamRuntime {
@@ -42,6 +43,7 @@ interface DelegationRuntime {
   agent_timeout_seconds?: number;
   max_turns?: number;
   background_root?: string;
+  ephemeral_root?: string;
   worker_python?: string;
   delegates: DelegateRuntime[];
   teams?: TeamRuntime[];
@@ -67,6 +69,7 @@ interface ToolRun {
 interface BackgroundResult {
   background: true;
   job_id: string;
+  worker_job_id?: string;
   agent: string;
   status: string;
 }
@@ -221,7 +224,7 @@ function startBackgroundJob(
     env: { ...process.env },
   });
   worker.unref();
-  return { background: true, job_id: delegationId, agent: delegate.agent, status: "queued" };
+  return { background: true, job_id: delegationId, worker_job_id: jobId, agent: delegate.agent, status: "queued" };
 }
 
 function runDelegate(
@@ -234,7 +237,7 @@ function runDelegate(
   onProgress: (result: DelegateResult) => void,
 ): Promise<DelegateResult> {
   const task = [
-    `Persistent Pipal delegation message from @agent:${from} in topic ${runtime.topic}.`,
+    `${delegate.ephemeral ? "Job-scoped ephemeral" : "Persistent"} Pipal delegation message from @agent:${from} in topic ${runtime.topic}.`,
     `Shared working directory: ${runtime.working_dir}`,
     "",
     message,
@@ -354,9 +357,81 @@ function runDelegate(
   });
 }
 
+interface EphemeralRecord {
+  schema_version: 1;
+  delegation_id: string;
+  primary: string;
+  topic: string;
+  role: string;
+  instructions: string;
+  provider: string;
+  model: string;
+  created_at: string;
+  closed_at?: string;
+  session_file?: string;
+}
+
+function ephemeralDir(runtime: DelegationRuntime, id: string): string {
+  if (!runtime.ephemeral_root) throw new Error("Ephemeral delegation is unavailable in this runtime");
+  if (!/^dg-[a-f0-9]{8}$/.test(id)) throw new Error("Invalid ephemeral delegation id");
+  return `${runtime.ephemeral_root}/${id}`;
+}
+
+function ephemeralRecord(runtime: DelegationRuntime, id: string): EphemeralRecord {
+  const record = JSON.parse(fs.readFileSync(`${ephemeralDir(runtime, id)}/worker.json`, "utf8")) as EphemeralRecord;
+  if (record.delegation_id !== id || record.primary !== runtime.primary || record.topic !== runtime.topic || record.closed_at) {
+    throw new Error(`Ephemeral delegation ${id} is unavailable or closed`);
+  }
+  return record;
+}
+
+function saveEphemeral(runtime: DelegationRuntime, record: EphemeralRecord): void {
+  const path = `${ephemeralDir(runtime, record.delegation_id)}/worker.json`;
+  const temp = `${path}.${randomUUID()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(record, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(temp, path);
+}
+
+function ensureNoRunningBackgroundTurn(runtime: DelegationRuntime, id: string): void {
+  if (!runtime.background_root || !fs.existsSync(runtime.background_root)) return;
+  const jobs = fs.readdirSync(runtime.background_root).filter((name) => /^dg-[a-f0-9]{8}$/.test(name));
+  const matching = jobs.flatMap((name) => {
+    try {
+      const job = JSON.parse(fs.readFileSync(`${runtime.background_root}/${name}/job.json`, "utf8"));
+      return job.delegate?.ephemeral && job.delegation_id === id ? [job] : [];
+    } catch { return []; }
+  });
+  if (matching.some((job) => job.status === "queued" || job.status === "running")) {
+    throw new Error(`Ephemeral delegation ${id} is still running; wait for it to finish before following up`);
+  }
+}
+
+function forkEphemeralSession(source: string | undefined, target: string, cwd: string): void {
+  if (!source || !fs.existsSync(source)) return;
+  const lines = fs.readFileSync(source, "utf8").split("\n").filter(Boolean);
+  if (!lines.length) return;
+  const header = { type: "session", version: 3, id: randomUUID(), timestamp: new Date().toISOString(), cwd, parentSession: source };
+  fs.writeFileSync(target, [JSON.stringify(header), ...lines.slice(1)].join("\n") + "\n");
+}
+
+function ephemeralDelegate(runtime: DelegationRuntime, record: EphemeralRecord, session: string): DelegateRuntime {
+  const dir = ephemeralDir(runtime, record.delegation_id);
+  return {
+    agent: `ephemeral:${record.role}`,
+    role: record.role,
+    ephemeral: true,
+    agent_path: dir,
+    provider: record.provider,
+    model: record.model,
+    prompt_file: `${dir}/prompt.md`,
+    session_file: session,
+    transcript_file: `${dir}/transcript.jsonl`,
+  };
+}
+
 export default function delegationExtension(pi: ExtensionAPI) {
   const runtime = loadRuntime();
-  if (!runtime || runtime.delegates.length === 0) return;
+  if (!runtime) return;
   const byName = new Map(runtime.delegates.map((delegate) => [delegate.agent.toLowerCase(), delegate]));
   const definitions = new Map(runtime.delegates.map((delegate) => {
     const tools = [
@@ -372,6 +447,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
   }));
   const renderState = new Map<string, { state: any; call?: any; result?: any }>();
   const queues = new Map<string, Promise<unknown>>();
+  const activeEphemeral = new Set<string>();
   let callsThisTurn = 0;
   let directAbort: AbortController | undefined;
   let directLoader: Loader | undefined;
@@ -434,15 +510,16 @@ export default function delegationExtension(pi: ExtensionAPI) {
     signal: AbortSignal | undefined,
     onProgress: (result: DelegateResult) => void,
   ) => {
-    const previous = queues.get(delegate.agent) ?? Promise.resolve();
+    const key = delegate.transcript_file;
+    const previous = queues.get(key) ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(() =>
       runDelegate(runtime, delegate, from, message, acceptance, signal, onProgress));
-    queues.set(delegate.agent, operation);
+    queues.set(key, operation);
     return operation;
   };
 
   const available = runtime.delegates.map((delegate) => `@agent:${delegate.agent}`).join(", ");
-  pi.registerTool({
+  if (runtime.delegates.length > 0) pi.registerTool({
     name: "pipal_delegate",
     label: "Delegate to Pipal agent",
     description: `Hold a persistent delegation thread with another registered Pipal agent. Available: ${available}. Use repeated calls to review, correct, and finish delegated work.`,
@@ -523,6 +600,110 @@ export default function delegationExtension(pi: ExtensionAPI) {
         container.addChild(response);
       }
       return container;
+    },
+  });
+
+  if (runtime.ephemeral_root) pi.registerTool({
+    name: "pipal_delegate_ephemeral",
+    label: "Delegate to one-off worker",
+    description: "Start a job-scoped worker without registering an agent, or follow up with the same worker using its delegation_id. Its session, transcript, and results remain durable. Prefer a registered agent for ongoing relationships. Never choose an expensive model or parallel workers without the owner's approval.",
+    promptSnippet: "Delegate a bounded outcome to an ephemeral model/role; follow up by delegation_id",
+    promptGuidelines: [
+      "Use registered agents for ongoing roles; use ephemeral workers for bounded, independent work needing a specific model or fresh perspective.",
+      "Frame acceptance criteria, inspect and verify results, and follow up using delegation_id before closing the job.",
+      "Do not silently choose a costly model or launch broad parallel work; follow the owner's approval boundaries.",
+      "Foreground is the default. Background work requires explicit owner approval.",
+    ],
+    parameters: Type.Object({
+      message: Type.String({ description: "Concrete task or next correction for this job" }),
+      provider: Type.Optional(Type.String({ description: "Pi provider for a NEW worker, e.g. openai-codex" })),
+      model: Type.Optional(Type.String({ description: "Pi model for a NEW worker" })),
+      role: Type.Optional(Type.String({ description: "Short role label for a NEW worker, e.g. Reviewer" })),
+      instructions: Type.Optional(Type.String({ description: "Job-specific role instructions for a NEW worker" })),
+      acceptance_criteria: Type.Optional(Type.String()),
+      delegation_id: Type.Optional(Type.String({ description: "Existing job id to continue the SAME worker; omit model/role/instructions" })),
+      mode: Type.Optional(Type.Union([Type.Literal("foreground"), Type.Literal("background")], { description: "Foreground by default; background only with owner approval" })),
+    }),
+    renderShell: "self",
+    async execute(_id, params, signal, onUpdate) {
+      if (callsThisTurn >= (runtime.max_turns ?? 8)) throw new Error(`Delegation turn budget reached (${runtime.max_turns ?? 8})`);
+      if (!params.message.trim()) throw new Error("Ephemeral delegation requires a task message");
+      let record: EphemeralRecord;
+      if (params.delegation_id) {
+        if (params.provider || params.model || params.role || params.instructions) throw new Error("A follow-up cannot change a worker's model, role, or instructions; start a new job instead");
+        record = ephemeralRecord(runtime, params.delegation_id);
+      } else {
+        const role = params.role?.trim();
+        const provider = params.provider?.trim();
+        const model = params.model?.trim();
+        const instructions = params.instructions?.trim();
+        if (!role || !provider || !model || !instructions) throw new Error("New ephemeral workers require role, provider, model, and instructions");
+        if (!/^[\w -]{1,60}$/.test(role)) throw new Error("Role must be a short label (letters, numbers, spaces, hyphens)");
+        let id: string;
+        let dir: string;
+        do { id = `dg-${randomUUID().slice(0, 8)}`; dir = ephemeralDir(runtime, id); } while (fs.existsSync(dir));
+        fs.mkdirSync(`${dir}/sessions`, { recursive: true, mode: 0o700 });
+        const prompt = `# Job-scoped Pipal worker\n\nYou are a temporary ${role} working for @agent:${runtime.primary} on topic ${runtime.topic}. You are not a registered or permanent Pipal agent.\nShared working directory: ${runtime.working_dir}.\nThe durable delegation transcript is at ${dir}/transcript.jsonl; consult it when a follow-up refers to earlier work.\n\nRole instructions:\n${instructions}\n\nPerform the requested work, report evidence and blockers honestly, and return only your answer body. The primary owns validation and the final outcome.\n`;
+        fs.writeFileSync(`${dir}/prompt.md`, prompt, { mode: 0o600 });
+        fs.writeFileSync(`${dir}/transcript.jsonl`, "", { flag: "wx", mode: 0o600 });
+        record = { schema_version: 1, delegation_id: id, primary: runtime.primary, topic: runtime.topic, role, instructions, provider, model, created_at: new Date().toISOString() };
+        saveEphemeral(runtime, record);
+      }
+      if (activeEphemeral.has(record.delegation_id)) throw new Error(`Ephemeral delegation ${record.delegation_id} is already active`);
+      activeEphemeral.add(record.delegation_id);
+      try {
+      // Do not fork from an in-flight worker. Previous successful sessions are
+      // immutable snapshots; each correction starts a fresh native Pi session.
+      ensureNoRunningBackgroundTurn(runtime, record.delegation_id);
+      const dir = ephemeralDir(runtime, record.delegation_id);
+      const nextSession = `${dir}/sessions/${randomUUID()}.jsonl`;
+      forkEphemeralSession(record.session_file, nextSession, runtime.working_dir);
+      const delegate = ephemeralDelegate(runtime, record, nextSession);
+      callsThisTurn += 1;
+      if (params.mode === "background") {
+        const background = startBackgroundJob(runtime, delegate, params.message, params.acceptance_criteria, { delegationId: record.delegation_id });
+        record.session_file = `${runtime.background_root}/${background.worker_job_id}/session.jsonl`;
+        saveEphemeral(runtime, record);
+        return { content: [{ type: "text", text: `Background ephemeral delegation ${record.delegation_id} (${record.role}, ${record.provider}/${record.model}) started. Follow up using this delegation_id after completion.` }], details: background };
+      }
+      appendEvent(delegate, { type: "message", author: runtime.primary, content: params.message, acceptance_criteria: params.acceptance_criteria, delegation_id: record.delegation_id, ephemeral: true });
+      const result = await runQueued(delegate, runtime.primary, params.message, params.acceptance_criteria, signal, (partial) => {
+        onUpdate?.({ content: [{ type: "text", text: partial.text || `${record.role} is ${partial.status}…` }], details: partial });
+      });
+      record.session_file = nextSession;
+      saveEphemeral(runtime, record);
+      result.delegationId = record.delegation_id;
+      appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: record.delegation_id, ephemeral: true });
+      return {
+        content: [{ type: "text", text: `Ephemeral delegation ${record.delegation_id} (${record.role}, ${record.provider}/${record.model})\n\n${result.text || "(no response)"}` }],
+        details: result,
+        usage: { input: result.inputTokens, output: result.outputTokens, cacheRead: 0, cacheWrite: 0, totalTokens: result.inputTokens + result.outputTokens, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.cost } },
+      };
+      } finally { activeEphemeral.delete(record.delegation_id); }
+    },
+    renderCall(args, theme) { return new Text(`${theme.fg("accent", theme.bold(args.delegation_id ? `↻ ${args.delegation_id}` : `◌ ${args.role || "one-off worker"}`))}\n${theme.fg("dim", String(args.message ?? ""))}`, 1, 0); },
+    renderResult(result, { expanded, isPartial }, theme) {
+      const details = result.details as DelegateResult | BackgroundResult | undefined;
+      if (!details) return new Text("", 0, 0);
+      if ("background" in details) return new Text(theme.fg("accent", `↗ ${details.job_id} · ephemeral worker running in background`), 1, 0);
+      const container = renderTools(details, expanded, theme);
+      if (details.text || !isPartial) container.addChild(new Markdown(`**${details.role} (${details.delegationId ?? "working"}):** ${details.text || "(no response)"}`, 0, 0, getMarkdownTheme()));
+      return container;
+    },
+  });
+
+  if (runtime.ephemeral_root) pi.registerTool({
+    name: "pipal_close_ephemeral",
+    label: "Close one-off delegation",
+    description: "Retire a job-scoped worker after review; preserve all evidence and reports. Closed workers reject follow-ups.",
+    parameters: Type.Object({ delegation_id: Type.String() }),
+    async execute(_id, params) {
+      const record = ephemeralRecord(runtime, params.delegation_id);
+      if (activeEphemeral.has(record.delegation_id)) throw new Error(`Ephemeral delegation ${record.delegation_id} is still active`);
+      ensureNoRunningBackgroundTurn(runtime, record.delegation_id);
+      record.closed_at = new Date().toISOString();
+      saveEphemeral(runtime, record);
+      return { content: [{ type: "text", text: `Closed ephemeral delegation ${record.delegation_id}. Transcript and sessions remain available.` }], details: { delegation_id: record.delegation_id, closed: true } };
     },
   });
 
