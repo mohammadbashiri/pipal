@@ -1,8 +1,6 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/pipal_logo_darkbackground.svg">
-    <img src="assets/pipal_logo_lightbackground.svg" alt="pipal logo" width="77">
-  </picture>
+  <img src="assets/pipal_logo_lightbackground.svg#gh-light-mode-only" alt="pipal logo" width="77">
+  <img src="assets/pipal_logo_darkbackground.svg#gh-dark-mode-only" alt="pipal logo" width="77">
 </p>
 
 <p align="center">pipal is a Persistent Agent Layer on top of the <a href="https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent"><strong>Pi coding agent</strong></a></p>
