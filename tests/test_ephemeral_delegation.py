@@ -8,7 +8,7 @@ import pytest
 
 from pipal import delegation_runtime
 from pipal.cli import build_parser
-from pipal.runner import _build_pi_cmd
+from pipal.runner import _build_pi_cmd, _session_llm_config, build_pipal_context
 
 
 ESBUILD = Path("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/esbuild")
@@ -23,10 +23,13 @@ def test_runtime_exposes_ephemeral_workers_without_registered_delegates(monkeypa
     primary.mkdir()
 
     runtime, path = delegation_runtime.build_delegation_runtime(
-        "momo", str(primary), "pipal", working_dir=tmp_path
+        "momo", str(primary), "pipal", working_dir=tmp_path,
+        primary_llm={"provider": "openai-codex", "model": "session-model"},
     )
 
     assert runtime["delegates"] == []
+    assert runtime["default_provider"] == "openai-codex"
+    assert runtime["default_model"] == "session-model"
     assert runtime["ephemeral_root"] == str(primary / "topics/pipal/delegations/ephemeral")
     assert path.is_file()
 
@@ -38,6 +41,9 @@ def test_chat_model_flags_override_only_the_session(tmp_path):
     command = _build_pi_cmd(str(tmp_path), saved, args.args, True, "main", None, include_extension=False)
     assert command == ["pi", "--provider", "openai-codex", "--model", "saved-model", "--no-session", "--model", "temporary-model"]
     assert saved["model"] == "saved-model"
+    assert _session_llm_config(saved, args.args) == {"provider": "openai-codex", "model": "temporary-model"}
+    assert _session_llm_config(saved, ["--provider=other", "--model=second"]) == {"provider": "other", "model": "second"}
+    assert "not Pi's separate `subagent`" in build_pipal_context(tmp_path, "main")
 
 
 @pytest.mark.skipif(not shutil.which("node") or not ESBUILD.is_dir(), reason="Pi's Node/esbuild runtime unavailable")

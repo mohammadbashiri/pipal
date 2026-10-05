@@ -50,6 +50,7 @@ def build_delegation_runtime(
     topic_name: str,
     *,
     working_dir: Path | None = None,
+    primary_llm: dict | None = None,
 ) -> tuple[dict, Path]:
     primary_home = Path(primary_path).resolve()
     cwd = (working_dir or Path.cwd()).resolve()
@@ -114,8 +115,11 @@ def build_delegation_runtime(
                 "members": members,
             })
 
+    selected_llm = primary_llm if primary_llm is not None else (load_llm_config(str(primary_home)) or {})
     runtime = {
         "schema_version": 2,
+        "default_provider": selected_llm.get("provider"),
+        "default_model": selected_llm.get("model"),
         "primary": primary_name,
         "primary_path": str(primary_home),
         "topic": topic_name,

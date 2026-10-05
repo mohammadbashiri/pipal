@@ -91,7 +91,7 @@ Current topic: {topic_name}
 
 For questions about prior context ("what did we do last time", etc.), read topics/{topic_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home.
 
-Persistent direct/delegation threads with other registered Pipal agents live under topics/{topic_name}/delegations/<agent>/. Use `pipal_delegate` for one agent and `pipal_delegate_team` for a saved team. Hold multi-turn threads and own delegated outcomes; do not act as a one-shot relay. Normal primary-agent chat is the default entry point. Keep detailed coordination compact unless the owner asks to watch or join it."""
+Persistent direct/delegation threads with other registered Pipal agents live under topics/{topic_name}/delegations/<agent>/. Use `pipal_delegate` for one agent and `pipal_delegate_team` for a saved team. For a bounded one-off Pipal worker, use `pipal_delegate_ephemeral` and follow up by delegation ID; it defaults to the provider/model selected when this chat started unless explicitly specified. When the owner says "ephemeral agent" in a Pipal delegation context, use this Pipal tool, not Pi's separate `subagent` tool, unless they specifically ask for Pi subagents. Hold multi-turn threads and own delegated outcomes; do not act as a one-shot relay. Normal primary-agent chat is the default entry point. Keep detailed coordination compact unless the owner asks to watch or join it."""
 
 
 def build_pipal_context(agent: Path, topic_name: str) -> str:
@@ -153,6 +153,18 @@ def _extension_paths(agent_type: str | None) -> list[Path]:
     if agent_type == "kbchat":
         return [Path(__file__).resolve().parent / "extensions" / "kbchat_greet.ts"]
     return DEFAULT_EXTENSIONS
+
+
+def _session_llm_config(saved: dict, extra_args: list[str]) -> dict:
+    """Mirror the provider/model flags passed to Pi, without changing llm.json."""
+    selected = dict(saved)
+    for index, arg in enumerate(extra_args):
+        for name in ("provider", "model"):
+            if arg == f"--{name}" and index + 1 < len(extra_args):
+                selected[name] = extra_args[index + 1]
+            elif arg.startswith(f"--{name}="):
+                selected[name] = arg.partition("=")[2]
+    return selected
 
 
 def _build_pi_cmd(
@@ -273,6 +285,7 @@ def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
             primary_name=agent.name,
             primary_path=agent_path,
             topic_name=topic_name,
+            primary_llm=_session_llm_config(llm_config, extra_args),
         )
         os.environ["PIPAL_DELEGATION_RUNTIME"] = str(delegation_runtime_file.resolve())
 
@@ -327,6 +340,7 @@ def run_agent_print(
             primary_name=agent.name,
             primary_path=agent_path,
             topic_name=topic_name,
+            primary_llm=_session_llm_config(llm_config, extra_args),
         )
         env["PIPAL_DELEGATION_RUNTIME"] = str(delegation_runtime_file.resolve())
     env["PIPAL_AGENT_DIR"] = str(agent.resolve())

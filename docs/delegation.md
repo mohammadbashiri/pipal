@@ -41,7 +41,7 @@ For an interactive primary-agent TUI, `pipal agent chat <name> --model <model>` 
 
 ## Job-scoped (ephemeral) workers
 
-For a bounded task that needs a fresh perspective or a particular provider/model, use `pipal_delegate_ephemeral`. Unlike `pipal_delegate`, this does **not** add an agent to the registry or reuse a permanent persona or model setting. The primary specifies `role`, `provider`, `model`, `instructions`, `message`, and optionally `acceptance_criteria`:
+For a bounded task that needs a fresh perspective or a particular provider/model, use `pipal_delegate_ephemeral`. Unlike `pipal_delegate`, this does **not** add an agent to the registry or reuse a permanent persona or model setting. The primary supplies a `message` and may specify `role`, `provider`, `model`, `instructions`, and `acceptance_criteria`. Omitted provider/model inherit the primary chat's startup selection (including CLI overrides); role defaults to General assistant and instructions to evidence-based work. A different provider requires an explicit model. If the chat has no configured provider/model, supply both. Pi's separate `subagent` tool is **not** Pipal delegation:
 
 ```text
 Have a one-off reviewer on my configured provider/model check this change,

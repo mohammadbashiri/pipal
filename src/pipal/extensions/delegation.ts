@@ -46,6 +46,8 @@ interface DelegationRuntime {
   background_root?: string;
   ephemeral_root?: string;
   model_override_root?: string;
+  default_provider?: string;
+  default_model?: string;
   worker_python?: string;
   delegates: DelegateRuntime[];
   teams?: TeamRuntime[];
@@ -688,20 +690,21 @@ export default function delegationExtension(pi: ExtensionAPI) {
   if (runtime.ephemeral_root) pi.registerTool({
     name: "pipal_delegate_ephemeral",
     label: "Delegate to one-off worker",
-    description: "Start a job-scoped worker without registering an agent, or follow up with the same worker using its delegation_id. Its session, transcript, and results remain durable. Prefer a registered agent for ongoing relationships. Never choose an expensive model or parallel workers without the owner's approval.",
-    promptSnippet: "Delegate a bounded outcome to an ephemeral model/role; follow up by delegation_id",
+    description: "Pipal's job-scoped ephemeral worker (not Pi's separate subagent tool). Start a bounded worker without registering an agent, or follow up with delegation_id. A new worker defaults to the primary chat's startup provider/model, a general role, and evidence-based instructions if omitted. Its session and transcript remain durable. Prefer registered agents for ongoing roles. Never silently choose an expensive model or parallel workers.",
+    promptSnippet: "For one-off Pipal delegation use pipal_delegate_ephemeral (not Pi subagent); provider/model default to the primary chat's startup selection",
     promptGuidelines: [
-      "Use registered agents for ongoing roles; use ephemeral workers for bounded, independent work needing a specific model or fresh perspective.",
+      "Use registered agents for ongoing roles; use this Pipal ephemeral worker for bounded independent work. Do not confuse it with Pi's separate subagent tool.",
+      "For a new worker, message alone is sufficient when the primary chat has a configured startup provider/model. Set role and instructions if the task needs a specific perspective; set provider/model only for an explicit alternative.",
       "Frame acceptance criteria, inspect and verify results, and follow up using delegation_id before closing the job.",
       "Do not silently choose a costly model or launch broad parallel work; follow the owner's approval boundaries.",
       "Foreground is the default. Background work requires explicit owner approval.",
     ],
     parameters: Type.Object({
       message: Type.String({ description: "Concrete task or next correction for this job" }),
-      provider: Type.Optional(Type.String({ description: "Pi provider for a NEW worker, e.g. openai-codex" })),
-      model: Type.Optional(Type.String({ description: "Pi model for a NEW worker" })),
-      role: Type.Optional(Type.String({ description: "Short role label for a NEW worker, e.g. Reviewer" })),
-      instructions: Type.Optional(Type.String({ description: "Job-specific role instructions for a NEW worker" })),
+      provider: Type.Optional(Type.String({ description: "Provider for a NEW worker; defaults to the primary chat's startup provider. If changing provider, specify model too" })),
+      model: Type.Optional(Type.String({ description: "Model for a NEW worker; defaults to the primary chat's startup model" })),
+      role: Type.Optional(Type.String({ description: "Short role label for a NEW worker; defaults to General assistant" })),
+      instructions: Type.Optional(Type.String({ description: "Job-specific instructions for a NEW worker; defaults to independent, evidence-based work" })),
       acceptance_criteria: Type.Optional(Type.String()),
       delegation_id: Type.Optional(Type.String({ description: "Existing job id to continue the SAME worker; omit model/role/instructions" })),
       mode: Type.Optional(Type.Union([Type.Literal("foreground"), Type.Literal("background")], { description: "Foreground by default; background only with owner approval" })),
@@ -715,11 +718,12 @@ export default function delegationExtension(pi: ExtensionAPI) {
         if (params.provider || params.model || params.role || params.instructions) throw new Error("A follow-up cannot change a worker's model, role, or instructions; start a new job instead");
         record = ephemeralRecord(runtime, params.delegation_id);
       } else {
-        const role = params.role?.trim();
-        const provider = params.provider?.trim();
-        const model = params.model?.trim();
-        const instructions = params.instructions?.trim();
-        if (!role || !provider || !model || !instructions) throw new Error("New ephemeral workers require role, provider, model, and instructions");
+        const role = params.role?.trim() || "General assistant";
+        const provider = params.provider?.trim() || runtime.default_provider?.trim();
+        const model = params.model?.trim() || runtime.default_model?.trim();
+        const instructions = params.instructions?.trim() || "Work independently on the assigned task. Ground claims in evidence, respect the primary's constraints, and report blockers honestly.";
+        if (params.provider && provider !== runtime.default_provider && !params.model?.trim()) throw new Error("Changing the provider requires a model for that provider");
+        if (!provider || !model) throw new Error("No default provider/model is configured for this session; specify both when creating the worker");
         if (!/^[\w -]{1,60}$/.test(role)) throw new Error("Role must be a short label (letters, numbers, spaces, hyphens)");
         let id: string;
         let dir: string;
