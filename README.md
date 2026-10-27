@@ -57,6 +57,8 @@ pipal agent create momo
 pipal agent chat momo
 ```
 
+Use `pipal agent chat momo --topic main --continue` to resume the latest native Pi session in that topic. Pipal holds a per-session lock while an `agent chat` process is running; another `agent chat` cannot open the same JSONL until it exits. Plain `pi` and other launch paths do not participate in this lock.
+
 Create a saved team from registered agents:
 
 ```bash

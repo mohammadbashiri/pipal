@@ -1,3 +1,4 @@
+import fcntl
 import os
 import shutil
 import sys
@@ -213,6 +214,29 @@ def _build_pi_cmd(
     return cmd
 
 
+def _lock_session_for_exec(cmd: list[str]) -> int | None:
+    """Hold an advisory lock through exec so two Pipal TUIs cannot share a JSONL file."""
+    session = next((cmd[i + 1] for i, arg in enumerate(cmd[:-1]) if arg == "--session"), None)
+    if session is None:
+        session = next((arg.partition("=")[2] for arg in cmd if arg.startswith("--session=")), None)
+    if not session:
+        return None
+    lock_path = Path(session).resolve().with_suffix(".jsonl.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.set_inheritable(fd, True)
+    except BlockingIOError:
+        os.close(fd)
+        print(f"This Pi session is already active: {session}. Quit it before resuming.", file=sys.stderr)
+        raise SystemExit(2)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def _run_agent_cmd(
     agent_path: str,
     llm_config: dict,
@@ -237,7 +261,12 @@ def _run_agent_cmd(
     os.environ["PIPAL_AGENT_DIR"] = str(Path(agent_path).resolve())
     os.environ["PIPAL_TOPIC"] = topic_name
     pi_bin = _find_native_pi()
-    os.execv(pi_bin, cmd)
+    lock_fd = _lock_session_for_exec(cmd)
+    try:
+        os.execv(pi_bin, cmd)
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
 
 
 def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
