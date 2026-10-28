@@ -1,0 +1,8 @@
+{
+  "name": "pipal-test-tools",
+  "private": true,
+  "description": "Development-only tooling for Pipal extension tests",
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

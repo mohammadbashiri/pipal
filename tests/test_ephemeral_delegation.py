@@ -4,14 +4,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 from pipal import delegation_runtime
 from pipal.cli import build_parser
 from pipal.runner import _build_pi_cmd, _session_llm_config, build_pipal_context
 
 
-ESBUILD = Path("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/esbuild")
+ESBUILD = Path(__file__).resolve().parents[1] / "node_modules" / "esbuild"
 HARNESS = Path(__file__).with_name("ephemeral_harness.cjs")
 
 
@@ -46,8 +45,9 @@ def test_chat_model_flags_override_only_the_session(tmp_path):
     assert "not Pi's separate `subagent`" in build_pipal_context(tmp_path, "main")
 
 
-@pytest.mark.skipif(not shutil.which("node") or not ESBUILD.is_dir(), reason="Pi's Node/esbuild runtime unavailable")
 def test_ephemeral_and_persistent_override_lifecycles():
+    assert shutil.which("node"), "Install Node.js to run extension lifecycle tests"
+    assert ESBUILD.is_dir(), "Run `npm ci` in the repository root to install extension test dependencies"
     result = subprocess.run(
         ["node", str(HARNESS)],
         env={**os.environ, "PIPAL_ESBUILD": str(ESBUILD), "PIPAL_PYTHON": sys.executable},

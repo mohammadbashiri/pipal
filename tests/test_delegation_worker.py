@@ -5,6 +5,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from pipal import delegation_worker
 from pipal.delegation_worker import request_cancel, run_job
 
@@ -23,17 +25,32 @@ def _job(tmp_path, *, job_id="dg-test", native_pi=None):
     }
 
 
-def test_background_delegation_worker_completes_and_persists_result(tmp_path, monkeypatch):
+@pytest.mark.parametrize("post_exit_drain", [False, True], ids=["live-stream", "post-exit-drain"])
+def test_background_delegation_worker_completes_and_persists_result(tmp_path, monkeypatch, post_exit_drain):
     fake_pi = tmp_path / "fake-pi"
     fake_pi.write_text(
         """#!/usr/bin/env python3
-import json
+import json, os, pathlib, time
+sequence = 0
+def emit(event):
+    global sequence
+    sequence += 1
+    print(json.dumps(event), flush=True)
+    ack_dir = os.environ.get("PIPAL_TEST_ACK_DIR")
+    if ack_dir:
+        # Keep the child alive until the worker has consumed each event.
+        ack = pathlib.Path(ack_dir) / str(sequence)
+        deadline = time.monotonic() + 5
+        while not ack.exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("worker did not acknowledge event")
+            time.sleep(0.01)
 args = {"command": "pwd"}
 result = {"content": [{"type": "text", "text": "verified"}], "details": {}}
-print(json.dumps({"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "bash", "args": args}), flush=True)
-print(json.dumps({"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "bash", "args": args, "result": result, "isError": False}), flush=True)
+emit({"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "bash", "args": args})
+emit({"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "bash", "args": args, "result": result, "isError": False})
 message = {"role": "assistant", "content": [{"type": "text", "text": "completed artifact"}]}
-print(json.dumps({"type": "message_end", "message": message}), flush=True)
+emit({"type": "message_end", "message": message})
 """,
         encoding="utf-8",
     )
@@ -44,13 +61,27 @@ print(json.dumps({"type": "message_end", "message": message}), flush=True)
     job_file = tmp_path / "job.json"
     job_file.write_text(json.dumps(job), encoding="utf-8")
 
-    # Force a quick exit so all events are read from the post-exit drain.
-    popen = subprocess.Popen
-    def start_and_wait(*args, **kwargs):
-        proc = popen(*args, **kwargs)
-        proc.wait(timeout=5)
-        return proc
-    monkeypatch.setattr(delegation_worker.subprocess, "Popen", start_and_wait)
+    monkeypatch.delenv("PIPAL_TEST_ACK_DIR", raising=False)
+    if post_exit_drain:
+        # Force all events through the post-exit drain.
+        popen = subprocess.Popen
+        def start_and_wait(*args, **kwargs):
+            proc = popen(*args, **kwargs)
+            proc.wait(timeout=5)
+            return proc
+        monkeypatch.setattr(delegation_worker.subprocess, "Popen", start_and_wait)
+    else:
+        ack_dir = tmp_path / "acks"
+        ack_dir.mkdir()
+        monkeypatch.setenv("PIPAL_TEST_ACK_DIR", str(ack_dir))
+        append_job_event = delegation_worker._append_job_event
+        consumed = 0
+        def acknowledge_event(path, event):
+            nonlocal consumed
+            append_job_event(path, event)
+            consumed += 1
+            (ack_dir / str(consumed)).touch()
+        monkeypatch.setattr(delegation_worker, "_append_job_event", acknowledge_event)
 
     assert run_job(job_file) == 0
 
@@ -66,8 +97,16 @@ print(json.dumps({"type": "message_end", "message": message}), flush=True)
     events = [json.loads(line) for line in transcript.read_text().splitlines()]
     messages = [(event["author"], event["content"]) for event in events if event["type"] == "message"]
     assert messages == [("sasha", "finish the artifact"), ("ada", "completed artifact")]
-    assert next(event for event in events if event["type"] == "tool_call")["tool"] == "bash"
-    assert next(event for event in events if event["type"] == "tool_result")["output"] == "verified"
+    assert [event["type"] for event in events] == ["message", "tool_call", "tool_result", "message"]
+    call, result = events[1:3]
+    assert call["tool"] == result["tool"] == "bash"
+    assert call["tool_call_id"] == result["tool_call_id"] == "call-1"
+    assert call["args"] == {"command": "pwd"}
+    assert result["output"] == "verified"
+    assert result["is_error"] is False
+    for event in (call, result):
+        assert event["author"] == "ada"
+        assert event["delegation_id"] == event["background_job"] == job["id"]
 
 
 def test_worker_does_not_run_an_exclusively_claimed_job(tmp_path):

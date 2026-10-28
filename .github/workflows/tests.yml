@@ -70,6 +70,9 @@ jobs:
       - name: Install dev dependencies
         run: uv pip install pytest httpx --system
 
+      - name: Install extension test dependencies
+        run: npm ci
+
       - name: Run unit tests
         run: pytest tests/ -v
 

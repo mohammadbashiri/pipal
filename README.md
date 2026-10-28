@@ -91,4 +91,6 @@ See [Pipal channels](docs/channels.md), [Pipal teams](docs/teams.md), and [deleg
 
 Docker support is **experimental**; local installation is the supported alpha path. See [Docker usage](docs/docker.md) for isolation and networking caveats.
 
+For development setup and test commands, see [Running tests](docs/testing.md).
+
 To learn what else pipal does, use `--help` or ask your agent to check out the repo.

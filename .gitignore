@@ -10,3 +10,4 @@ wheels/
 .venv
 /agents
 .env
+node_modules/
