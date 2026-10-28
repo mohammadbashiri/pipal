@@ -697,7 +697,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       "For a new worker, message alone is sufficient when the primary chat has a configured startup provider/model. Set role and instructions if the task needs a specific perspective; set provider/model only for an explicit alternative.",
       "Frame acceptance criteria, inspect and verify results, and follow up using delegation_id before closing the job.",
       "Do not silently choose a costly model or launch broad parallel work; follow the owner's approval boundaries.",
-      "Foreground is the default. Background work requires explicit owner approval.",
+      "Background is the default for ephemeral workers; use foreground when explicitly requested. Return the delegation ID so the owner can continue chatting.",
     ],
     parameters: Type.Object({
       message: Type.String({ description: "Concrete task or next correction for this job" }),
@@ -707,7 +707,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       instructions: Type.Optional(Type.String({ description: "Job-specific instructions for a NEW worker; defaults to independent, evidence-based work" })),
       acceptance_criteria: Type.Optional(Type.String()),
       delegation_id: Type.Optional(Type.String({ description: "Existing job id to continue the SAME worker; omit model/role/instructions" })),
-      mode: Type.Optional(Type.Union([Type.Literal("foreground"), Type.Literal("background")], { description: "Foreground by default; background only with owner approval" })),
+      mode: Type.Optional(Type.Union([Type.Literal("foreground"), Type.Literal("background")], { description: "Background by default; choose foreground to wait for the worker" })),
     }),
     renderShell: "self",
     async execute(_id, params, signal, onUpdate) {
@@ -746,7 +746,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       forkEphemeralSession(record.session_file, nextSession, runtime.working_dir);
       const delegate = ephemeralDelegate(runtime, record, nextSession);
       callsThisTurn += 1;
-      if (params.mode === "background") {
+      if (params.mode !== "foreground") {
         const background = startBackgroundJob(runtime, delegate, params.message, params.acceptance_criteria, { delegationId: record.delegation_id });
         record.session_file = `${runtime.background_root}/${background.worker_job_id}/session.jsonl`;
         saveEphemeral(runtime, record);
