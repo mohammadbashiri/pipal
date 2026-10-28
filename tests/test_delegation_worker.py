@@ -23,7 +23,7 @@ def _job(tmp_path, *, job_id="dg-test", native_pi=None):
     }
 
 
-def test_background_delegation_worker_completes_and_persists_result(tmp_path):
+def test_background_delegation_worker_completes_and_persists_result(tmp_path, monkeypatch):
     fake_pi = tmp_path / "fake-pi"
     fake_pi.write_text(
         """#!/usr/bin/env python3
@@ -44,6 +44,14 @@ print(json.dumps({"type": "message_end", "message": message}), flush=True)
     job_file = tmp_path / "job.json"
     job_file.write_text(json.dumps(job), encoding="utf-8")
 
+    # Force a quick exit so all events are read from the post-exit drain.
+    popen = subprocess.Popen
+    def start_and_wait(*args, **kwargs):
+        proc = popen(*args, **kwargs)
+        proc.wait(timeout=5)
+        return proc
+    monkeypatch.setattr(delegation_worker.subprocess, "Popen", start_and_wait)
+
     assert run_job(job_file) == 0
 
     completed = json.loads(job_file.read_text(encoding="utf-8"))
@@ -58,6 +66,7 @@ print(json.dumps({"type": "message_end", "message": message}), flush=True)
     events = [json.loads(line) for line in transcript.read_text().splitlines()]
     messages = [(event["author"], event["content"]) for event in events if event["type"] == "message"]
     assert messages == [("sasha", "finish the artifact"), ("ada", "completed artifact")]
+    assert next(event for event in events if event["type"] == "tool_call")["tool"] == "bash"
     assert next(event for event in events if event["type"] == "tool_result")["output"] == "verified"
 
 

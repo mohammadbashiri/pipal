@@ -205,6 +205,24 @@ def run_job(job_file: Path) -> int:
         selector.register(proc.stdout, selectors.EVENT_READ)
         deadline = time.monotonic() + int(job.get("timeout_seconds", 300))
         diagnostic: list[str] = []
+
+        def process_line(line: str) -> None:
+            nonlocal final_text
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                diagnostic.append(line.strip())
+                return
+            _append_job_event(job_file, {**event, **lineage})
+            if event.get("type") == "tool_execution_start":
+                _append_thread(job, {"type": "tool_call", "author": delegate["agent"], "tool": event.get("toolName"), "args": event.get("args", {}), "tool_call_id": event.get("toolCallId"), "delegation_id": job.get("delegation_id", job["id"]), "background_job": job["id"], **lineage})
+            elif event.get("type") == "tool_execution_end":
+                result = event.get("result", {})
+                output = "\n".join(part.get("text", "") for part in result.get("content", []) if part.get("type") == "text")
+                _append_thread(job, {"type": "tool_result", "author": delegate["agent"], "tool": event.get("toolName"), "output": output, "is_error": bool(event.get("isError")), "tool_call_id": event.get("toolCallId"), "delegation_id": job.get("delegation_id", job["id"]), "background_job": job["id"], **lineage})
+            elif event.get("type") == "message_end":
+                final_text = _text(event.get("message", {})) or final_text
+
         while proc.poll() is None:
             if time.monotonic() >= deadline:
                 proc.terminate()
@@ -214,23 +232,9 @@ def run_job(job_file: Path) -> int:
             for key, _ in selector.select(timeout=0.2):
                 line = key.fileobj.readline()
                 if not line: continue
-                try: event = json.loads(line)
-                except json.JSONDecodeError:
-                    diagnostic.append(line.strip()); continue
-                _append_job_event(job_file, {**event, **lineage})
-                if event.get("type") == "tool_execution_start":
-                    _append_thread(job, {"type": "tool_call", "author": delegate["agent"], "tool": event.get("toolName"), "args": event.get("args", {}), "tool_call_id": event.get("toolCallId"), "delegation_id": job.get("delegation_id", job["id"]), "background_job": job["id"], **lineage})
-                elif event.get("type") == "tool_execution_end":
-                    result = event.get("result", {})
-                    output = "\n".join(part.get("text", "") for part in result.get("content", []) if part.get("type") == "text")
-                    _append_thread(job, {"type": "tool_result", "author": delegate["agent"], "tool": event.get("toolName"), "output": output, "is_error": bool(event.get("isError")), "tool_call_id": event.get("toolCallId"), "delegation_id": job.get("delegation_id", job["id"]), "background_job": job["id"], **lineage})
-                elif event.get("type") == "message_end":
-                    final_text = _text(event.get("message", {})) or final_text
+                process_line(line)
         for line in proc.stdout:
-            try:
-                event = json.loads(line); _append_job_event(job_file, {**event, **lineage})
-                if event.get("type") == "message_end": final_text = _text(event.get("message", {})) or final_text
-            except json.JSONDecodeError: diagnostic.append(line.strip())
+            process_line(line)
         if proc.returncode != 0:
             raise RuntimeError("\n".join(filter(None, diagnostic[-3:])) or f"delegate exited with code {proc.returncode}")
         completed = _finalize(job_file, "completed", result=final_text or "(no response)")
