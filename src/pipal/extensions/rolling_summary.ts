@@ -234,6 +234,26 @@ const loadLastEntryType = (sessionPath?: string | null): string | undefined => {
 
 export default function (pi: ExtensionAPI) {
   let summarizedThisSession = false;
+  let summaryContext: ExtensionContext | undefined;
+  let exitChoice: { requestId: string; sessionId: string; choice: "summarize" | "skip" } | undefined;
+  const announceQuitChoices = (requestId?: string, prepared = false) => {
+    if (!summaryContext) return;
+    pi.events.emit("pipal:summary-quit-state", { available: true, protocol: 1,
+      sessionId: summaryContext.sessionManager.getSessionId(), requestId, prepared });
+  };
+  pi.events.on("pipal:summary-quit-request", (raw: unknown) => {
+    const request = raw as { action?: string; requestId?: string; sessionId?: string; choice?: string };
+    if (!request || !summaryContext || request.sessionId !== summaryContext.sessionManager.getSessionId()) return;
+    if (request.action === "status") { announceQuitChoices(); return; }
+    if (typeof request.requestId !== "string" || !/^[a-f0-9-]{36}$/.test(request.requestId)) return;
+    if (request.action === "clear") {
+      if (exitChoice?.requestId === request.requestId) exitChoice = undefined;
+    } else if (request.action === "prepare" && (request.choice === "summarize" || request.choice === "skip")) {
+      if (exitChoice && exitChoice.requestId !== request.requestId) return;
+      exitChoice = { requestId: request.requestId, sessionId: request.sessionId, choice: request.choice };
+      announceQuitChoices(request.requestId, true);
+    }
+  });
 
   const writeSummary = async (ctx: ExtensionContext) => {
     const sessionFile = ctx.sessionManager.getSessionFile();
@@ -335,7 +355,7 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  const handleSummaryOnExit = async (ctx: ExtensionContext) => {
+  const handleSummaryOnExit = async (ctx: ExtensionContext, choice?: "summarize" | "skip") => {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const summaryPath = resolveSummaryPath(sessionFile);
 
@@ -347,7 +367,13 @@ export default function (pi: ExtensionAPI) {
         (entry.message?.role === "user" || entry.message?.role === "assistant")
       );
 
-    if (ctx.mode !== "tui" || !hasMessages) {
+    // A browser-selected choice is explicit, session-scoped and consumed once.
+    // Never read stdin for this path; normal terminal quits retain their prompt.
+    if (choice === "skip") {
+      if (summaryPath) logSummaryEvent(summaryPath, "Summarize skipped (explicit app choice)");
+      return;
+    }
+    if (choice === "summarize" || ctx.mode !== "tui" || !hasMessages) {
       await writeSummary(ctx);
       return;
     }
@@ -369,6 +395,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (event, ctx) => {
     summarizedThisSession = false;
+    exitChoice = undefined;
+    summaryContext = ctx;
+    announceQuitChoices();
     if (!shouldInitializeSummarySession(event.reason)) return;
 
     const sessionFile = ctx.sessionManager.getSessionFile();
@@ -394,8 +423,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
+    const prepared = exitChoice;
+    exitChoice = undefined;
+    summaryContext = undefined;
     if (!shouldSummarizeOnShutdown(event.reason) || summarizedThisSession) return;
-    await handleSummaryOnExit(ctx);
+    const choice = prepared?.sessionId === ctx.sessionManager.getSessionId() ? prepared.choice : undefined;
+    await handleSummaryOnExit(ctx, choice);
   });
 
 }

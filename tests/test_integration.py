@@ -205,6 +205,14 @@ class TestRunnerHelpers:
         assert any("kbchat_greet" in str(p) for p in paths)
         assert not any("auto_greet" in str(p) for p in paths)
 
+    def test_rolling_summary_app_quit_choices(self):
+        script = Path(__file__).with_name("summary-quit-bridge.test.mjs")
+        result = subprocess.run(
+            ["node", "--test", str(script)],
+            check=False, capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
     def test_rolling_summary_lifecycle_policy(self):
         extension = next(path for path in _extension_paths(None) if path.name == "rolling_summary.ts")
         script = f"""
