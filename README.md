@@ -24,6 +24,7 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 - topics that persist independently of the working directory
 - native Pi sessions inside topics, with optional, agent-maintained summaries
 - human-owned AI teams and channel-style shared multi-agent conversations in Pi's TUI
+- live-session discovery, start/resume, attributed messaging, graceful quit and human handoff
 - persistent direct agent messaging and outcome-owned delegation
 - an optional local HTTP/WS server
 
@@ -49,6 +50,12 @@ Each topic may have a `summary.md` as a compact reference. Agents know its locat
 
 `/quit` simply quits. Pipal no longer summarizes or asks about saving during shutdown. Existing summary files and legacy metadata are preserved, but old `summary.state.json` files are not used to decide current coverage. The old `pipal topic summarize` CLI is retired; see [topics](docs/topics.md).
 
+### Live sessions
+
+Agents can discover participating Pi and Pipal sessions, start a normal conversation for work or human handoff, message an existing conversation and gracefully close idle work. Choose `kind: "pi"` (CLI: `pipal live start --kind pi --directory /path/to/project --json`) for plain Pi without Pipal identity, topics or memory; Pipal remains the backward-compatible default. Native UUIDs—not agent names—identify exact conversations. Type `@session:` in any participating TUI or `@` in either Pi App chat type to select a session; a leading mention sends directly without a source model turn. Other mentions remain references in an ordinary prompt.
+
+Use `pipal live list --json` to inspect running sessions and `pipal live attach <id>` to take over the same Pipal-started TUI. Discovery, queues and replies work without Pi App or Telegram. Messages to busy recipients queue without interruption; request IDs survive disconnects, and delivery is never automatically retried. Sessions an agent did not create require explicit owner approval to close. Existing TUIs need `/reload` once. See [Live sessions](docs/live-sessions.md) for tools, CLI, identity, handoff and safety details.
+
 ## What pipal is not
 
 `pipal` is not a replacement for Pi. Models, providers, tools, and runtime behavior are Pi's job. pipal wraps around it.
@@ -57,7 +64,7 @@ If Pi breaks, pipal breaks. If Pi changes behavior, pipal follows. That's the de
 
 ## Installation
 
-Requires [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) **0.84.1 or newer** and [uv](https://docs.astral.sh/uv/). Pipal follows Pi's current extension APIs rather than emulating them for older releases.
+Requires [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) **1.4.0 or newer** and [uv](https://docs.astral.sh/uv/). Pipal follows Pi's current extension APIs rather than emulating them for older releases.
 
 ```bash
 git clone https://github.com/mohammadbashiri/pipal

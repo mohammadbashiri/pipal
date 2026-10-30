@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import commandsExtension from '../src/pipal/extensions/commands.ts';
+import { registerSummary as commandsExtension } from '../src/pipal/extensions/commands.ts';
 
 for (const [args, expected] of [
   ['', 'Summarize our conversation so far.'],

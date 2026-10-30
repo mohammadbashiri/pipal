@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        pi_version: ["0.84.1", "latest"]
+        pi_version: ["1.4.0", "latest"]
 
     steps:
       - uses: actions/checkout@v4

@@ -29,7 +29,7 @@ REQUIRED_FLAGS = [
     "--resume",
     "--tools",
 ]
-MIN_PI_VERSION = "0.84.1"
+MIN_PI_VERSION = "1.4.0"
 
 REMEDIATION = {
     "pi binary": [

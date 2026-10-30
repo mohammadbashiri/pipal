@@ -163,6 +163,9 @@ def build_parser():
     p_doctor = sub.add_parser("check-pi-compatibility", help="Check local pi compatibility")
     p_doctor.add_argument("--agent", default=None, help="Agent to use for runtime check")
 
+    live = sub.add_parser("live", help="Discover, start, message, inspect, attach to or quit live sessions", add_help=False)
+    live.add_argument("args", nargs=argparse.REMAINDER)
+
     p_uninstall = sub.add_parser("uninstall", help="Remove pipal data directory (~/.pipal)")
     p_uninstall.add_argument("--yes", action="store_true", help="Skip confirmation")
 
@@ -201,6 +204,9 @@ def _rollback_agent_creation(
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "live":
+        from .live_sessions import main as live_main
+        return live_main(argv[1:])
 
     args = build_parser().parse_args(argv)
 
