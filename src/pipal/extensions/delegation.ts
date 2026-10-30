@@ -49,6 +49,7 @@ interface DelegationRuntime {
   default_provider?: string;
   default_model?: string;
   worker_python?: string;
+  source_session_id?: string;
   delegates: DelegateRuntime[];
   teams?: TeamRuntime[];
 }
@@ -89,6 +90,7 @@ interface DelegateResult {
   cost: number;
   status: string;
   tools: ToolRun[];
+  live_session?: { session_id: string; request_id: string; runtime_id: string };
 }
 
 interface TeamDelegateResult {
@@ -217,6 +219,8 @@ function startBackgroundJob(
     message,
     acceptance_criteria: acceptanceCriteria,
     session_file: sessionFile,
+    source_session_id: runtime.source_session_id,
+    source_snapshot: { session_id: runtime.source_session_id ?? null, kind: "pipal", agent: runtime.primary, topic: runtime.topic },
     // Terminal job.json plus .notifications markers provide durable passive
     // completion notices across TUI closure/reopen.
     reported: false,
@@ -240,6 +244,7 @@ function runDelegate(
   signal: AbortSignal | undefined,
   onProgress: (result: DelegateResult) => void,
 ): Promise<DelegateResult> {
+  if (signal?.aborted) return Promise.reject(new Error(`@agent:${delegate.agent} was cancelled`));
   const task = [
     `${delegate.ephemeral ? "Job-scoped ephemeral" : "Persistent"} Pipal delegation message from @agent:${from} in topic ${runtime.topic}.`,
     `Shared working directory: ${runtime.working_dir}`,
@@ -249,27 +254,22 @@ function runDelegate(
     "",
     "Perform the work and return concrete results or a precise blocker. This is a continuing thread, so use prior session context when relevant.",
   ].filter(Boolean).join("\n");
-  const args = [
-    "--mode", "json",
-    "--session", delegate.session_file,
-    "--append-system-prompt", delegate.prompt_file,
-  ];
-  if (delegate.provider) args.push("--provider", delegate.provider);
-  if (delegate.model) args.push("--model", delegate.model);
-  args.push("-p", task);
-
+  if (!runtime.worker_python) return Promise.reject(new Error("Shared session worker Python is unavailable"));
+  const request = {
+    native_pi: runtime.native_pi, session_file: delegate.session_file,
+    directory: runtime.working_dir, prompt_file: delegate.prompt_file,
+    agent_directory: delegate.agent_path, topic: runtime.topic,
+    provider: delegate.provider, model: delegate.model,
+    timeout_seconds: Math.max(1, runtime.agent_timeout_seconds ?? 300), text: task,
+    sender_session: runtime.source_session_id,
+    sender_snapshot: { session_id: runtime.source_session_id ?? null, kind: "pipal", agent: from, topic: runtime.topic },
+  };
   return new Promise((resolve, reject) => {
-    const proc = spawn(runtime.native_pi, args, {
-      cwd: runtime.working_dir,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        PIPAL_AGENT_DIR: delegate.agent_path,
-        PIPAL_TOPIC: runtime.topic,
-        PIPAL_DISABLE_AUTOGREET: "1",
-      },
+    const proc = spawn(runtime.worker_python!, ["-m", "pipal.session_worker"], {
+      cwd: runtime.working_dir, shell: false, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env },
     });
+    proc.stdin.on("error", () => {}); // A failed startup is reported by close/error.
+    proc.stdin.end(`${JSON.stringify(request)}\n`);
     let buffer = "";
     let stderr = "";
     let text = "";
@@ -277,6 +277,7 @@ function runDelegate(
     let outputTokens = 0;
     let cost = 0;
     let status = "thinking";
+    let liveSession: DelegateResult["live_session"];
     const tools: ToolRun[] = [];
     const snapshot = (): DelegateResult => ({
       agent: delegate.agent,
@@ -287,13 +288,19 @@ function runDelegate(
       outputTokens,
       cost,
       status,
-      tools: tools.map((tool) => ({ ...tool })),
+      tools: tools.map((tool) => ({ ...tool })), live_session: liveSession,
     });
     const processEvent = (line: string) => {
       if (!line.trim()) return;
       let event: any;
       try { event = JSON.parse(line); } catch { return; }
-      if (event.type === "tool_execution_start") {
+      if (event.type === "session_request_started") {
+        liveSession = { session_id: event.session.session_id, runtime_id: event.session.runtime_id, request_id: event.request_id };
+        onProgress(snapshot());
+      } else if (event.type === "session_result") {
+        text = stripPrefix(event.final_text || "", delegate.agent);
+        onProgress(snapshot());
+      } else if (event.type === "tool_execution_start") {
         tools.push({ id: String(event.toolCallId), name: String(event.toolName), args: event.args ?? {}, status: "running" });
         status = `using ${event.toolName}`;
         appendEvent(delegate, { type: "tool_call", author: delegate.agent, tool: event.toolName, args: event.args ?? {} });
@@ -333,23 +340,23 @@ function runDelegate(
       buffer = lines.pop() ?? "";
       for (const line of lines) processEvent(line);
     });
-    proc.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    proc.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString()).slice(-16000); });
 
     let closed = false;
     let aborted = false;
-    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const terminate = () => {
       proc.kill("SIGTERM");
-      setTimeout(() => { if (!closed) proc.kill("SIGKILL"); }, 3000);
+      // The shared runner owns abort/EOF/disposal of its native child.
+      killTimer = setTimeout(() => { if (!closed) proc.kill("SIGKILL"); }, 8000);
+      killTimer.unref();
     };
-    const timeoutSeconds = Math.max(1, runtime.agent_timeout_seconds ?? 300);
-    const timeout = setTimeout(() => { timedOut = true; terminate(); }, timeoutSeconds * 1000);
-    proc.on("error", (error) => { closed = true; clearTimeout(timeout); reject(error); });
+    proc.on("error", (error) => { closed = true; clearTimeout(killTimer); signal?.removeEventListener("abort", abort); reject(error); });
     proc.on("close", (code) => {
       closed = true;
-      clearTimeout(timeout);
+      clearTimeout(killTimer);
+      signal?.removeEventListener("abort", abort);
       if (buffer.trim()) processEvent(buffer);
-      if (timedOut) return reject(new Error(`@agent:${delegate.agent} timed out after ${timeoutSeconds}s`));
       if (aborted) return reject(new Error(`@agent:${delegate.agent} was cancelled`));
       if ((code ?? 1) !== 0) return reject(new Error(stderr.trim() || `@agent:${delegate.agent} exited with code ${code}`));
       status = "done";
@@ -652,7 +659,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
         saveModelOverride(runtime, scoped);
       }
       result.delegationId = delegationId;
-      appendEvent(target, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: delegationId });
+      appendEvent(target, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: delegationId, live_session: result.live_session });
       return {
         content: [{ type: "text", text: `Delegation ${delegationId}\n\n${result.text || "(no response)"}` }],
         details: result,
@@ -758,7 +765,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       record.session_file = nextSession;
       saveEphemeral(runtime, record);
       result.delegationId = record.delegation_id;
-      appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: record.delegation_id, ephemeral: true });
+      appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: record.delegation_id, ephemeral: true, live_session: result.live_session });
       return {
         content: [{ type: "text", text: `Ephemeral delegation ${record.delegation_id} (${record.role}, ${record.provider || "Pi default"}/${record.model || "Pi default"})\n\n${result.text || "(no response)"}` }],
         details: result,
@@ -851,7 +858,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
         });
         result.delegationId = delegationId;
         appendEvent(delegate, {
-          type: "message", author: delegate.agent, content: result.text || "(no response)",
+          type: "message", author: delegate.agent, content: result.text || "(no response)", live_session: result.live_session,
           delegation_id: delegationId, team: team.name,
         });
         return result;
@@ -1028,6 +1035,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
         error: job.error,
         created_at: job.created_at,
         finished_at: job.finished_at,
+        live_session: job.live_session,
       }));
       return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }], details: { count: selected.length } };
     },
@@ -1345,7 +1353,7 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
         });
         ctx.ui.setWidget(`pipal-direct-live-${delegate.agent}`, undefined);
         if (result.tools.length > 0) pi.appendEntry("pipal-direct-tools", { result });
-        appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: joinedDelegation });
+        appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: joinedDelegation, live_session: result.live_session });
         pi.appendEntry("pipal-direct-reply", { agent: delegate.agent, text: result.text || "(no response)" });
       }));
     } catch (error) {
@@ -1363,6 +1371,7 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
   });
 
   pi.on("session_start", (_event, ctx) => {
+    if (pi.getAllTools?.().some(tool => tool.name === "pipal_session_message")) runtime.source_session_id = ctx.sessionManager.getSessionId();
     if (ctx.mode !== "tui") return;
     const notifyFinished = (message: string) => ctx.ui.notify(message, "info");
     reportFinishedJobs(notifyFinished);

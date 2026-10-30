@@ -9,6 +9,7 @@ const esbuild = require(process.env.PIPAL_ESBUILD);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipal-ephemeral-test-'));
 const ext = path.resolve(__dirname, '../src/pipal/extensions/delegation.ts');
 const fakePi = path.join(dir, 'fake-pi');
+process.env.PIPAL_HOME = path.join(dir, 'runtime-home');
 fs.writeFileSync(fakePi, `#!/usr/bin/env python3
 import json, sys, pathlib
 args = sys.argv
@@ -22,6 +23,8 @@ with session.open('a') as f: f.write(json.dumps({'type': 'message', 'message': {
 print(json.dumps({'type': 'message_end', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'revision %s using %s' % (count, model)}], 'usage': {'input': 2, 'output': 2, 'cost': {'total': 0}}}}), flush=True)
 `);
 fs.chmodSync(fakePi, 0o755);
+const wrapped = require('node:child_process').spawnSync(process.env.PIPAL_PYTHON, [path.join(__dirname, 'fake_live_pi.py'), '--wrap', fakePi], {encoding: 'utf8'});
+assert.equal(wrapped.status, 0, wrapped.stderr);
 const runtimeFile = path.join(dir, 'runtime.json');
 fs.writeFileSync(runtimeFile, JSON.stringify({primary: 'momo', topic: 'test', working_dir: dir, native_pi: fakePi, default_provider: 'fake', default_model: 'session-model', delegates: [], ephemeral_root: path.join(dir, 'ephemeral'), model_override_root: path.join(dir, 'model-overrides'), background_root: path.join(dir, 'jobs'), worker_python: process.env.PIPAL_PYTHON, agent_timeout_seconds: 5}));
 process.env.PIPAL_DELEGATION_RUNTIME = runtimeFile;

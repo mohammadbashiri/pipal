@@ -103,6 +103,7 @@ Pipal ships Pi extensions (TypeScript), including:
 - **auto_greet.ts** — detects first-run vs returning user and sends appropriate greeting instruction. Uses the `onboarding.md` checklist to determine first-run status.
 - **commands.ts** — `/pipal:summary` submits an ordinary conversational summary request. No file writes, lifecycle interception, compaction or separate model calls.
 - **delegation.ts** — namespaced delegation commands and tools, durable work and reports.
+- **session_worker.py** — bounded headless native RPC runner for foreground/background delegation; uses shared live-session presence, delivery/results and runtime-bound cleanup rather than separate print-prompt subprocess plumbing.
 - **team_chat.ts** — team-room routing and `/pipal:team stop`.
 - **kbchat_greet.ts** — greeting for kbchat agents. Reads KB config and includes KB name in the greeting.
 
@@ -150,7 +151,7 @@ Security note:
 
 Pi owns default model selection and provider authentication. Pipal agents own identity, memory, and persistence, not model defaults. Legacy `llm.json` and `llm.local.json` files are not read or rewritten.
 
-Explicit per-launch, delegation, or team-member overrides are passed to Pi via `--provider` and/or `--model`. Without an override, these flags are omitted. Existing delegation records and native sessions retain historical model provenance. Topic summaries likewise use Pi defaults unless given an explicit override or `PIPAL_SUMMARY_PROVIDER` / `PIPAL_SUMMARY_MODEL`.
+Explicit per-launch, delegation, or team-member overrides are passed to Pi via `--provider` and/or `--model`. Without an override, these flags are omitted. Existing delegation records and native sessions retain historical model provenance. Conversational `/pipal:summary` uses the current native runtime/model; there is no separate summary model or default.
 
 ## Registry
 

@@ -112,13 +112,18 @@ def _records() -> list[dict]:
     return records
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(*, pid: int | None = None, session_file: Path | None = None) -> list[dict]:
     sessions = []
     for record in _records():
         try:
+            # Owned-child startup must not probe unrelated (possibly stalled) runtimes.
+            if pid is not None and record.get('pid') != pid:
+                continue
+            if session_file is not None and (not record.get('session_file') or Path(record['session_file']).resolve() != session_file.resolve()):
+                continue
             current = _rpc(record, 'inspect')['session']
             sessions.append(_public(current))
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError, TypeError):
             # A PID by itself is not proof of liveness or ownership.
             continue
     return sorted(sessions, key=lambda item: (item.get('agent', ''), item.get('topic', ''), item['session_id']))
@@ -145,21 +150,40 @@ def inspect_session(target: str) -> dict:
     return _public(_rpc(_resolve(target), 'inspect')['session'])
 
 
-def _sender(sender_session: str | None) -> dict:
+def _sender(sender_session: str | None, sender_name: str | None = None) -> dict:
     if sender_session:
         record = inspect_session(_canonical_id(sender_session))
         return {key: record.get(key) for key in ('session_id', 'kind', 'agent', 'topic', 'name', 'directory')}
-    return {'session_id': None, 'name': 'Owner (local CLI)'}
+    if sender_name is not None and (not isinstance(sender_name, str) or not sender_name.strip() or len(sender_name) > 200):
+        raise LiveSessionError('Sender label must contain 1–200 characters')
+    return {'session_id': None, 'name': sender_name or 'Owner (local CLI)'}
 
 
-def message_session(target: str, text: str, sender_session: str | None = None, wait: float = 0, request_id: str | None = None) -> dict:
+def message_session(target: str, text: str, sender_session: str | None = None, wait: float = 0, request_id: str | None = None, *, sender_name: str | None = None, sender_snapshot: dict | None = None, expected_runtime_id: str | None = None) -> dict:
     if not isinstance(text, str) or not text.strip() or len(text) > 32768:
         raise LiveSessionError('Message must contain 1–32768 characters')
     if not 0 <= wait <= 30:
         raise LiveSessionError('wait must be between 0 and 30 seconds')
     request_id = _canonical_id(request_id) if request_id else str(uuid4())
     record = _resolve(target)
-    sender = _sender(sender_session)
+    if expected_runtime_id is not None and record['runtime_id'] != _canonical_id(expected_runtime_id):
+        raise LiveSessionError('Session runtime changed; no message was sent')
+    if sender_snapshot is None:
+        sender = _sender(sender_session, sender_name)
+    else:
+        # Owned headless launches retain attribution after the primary exits.
+        # This is a captured peer identity, never a live owner-approval token.
+        if not isinstance(sender_snapshot, dict) or sender_snapshot.get('session_id') != sender_session:
+            raise LiveSessionError('Captured sender does not match the launching session')
+        if sender_session is not None:
+            _canonical_id(sender_session)
+        sender = {'session_id': sender_session, 'attribution': 'captured-at-launch'}
+        for key in ('kind', 'agent', 'topic', 'name'):
+            value = sender_snapshot.get(key)
+            if value is not None:
+                if not isinstance(value, str) or len(value) > 200:
+                    raise LiveSessionError('Invalid captured sender label')
+                sender[key] = value
     if record['session_id'] == sender_session:
         raise LiveSessionError('Use the current conversation directly instead of messaging itself')
     try:
@@ -190,8 +214,10 @@ def result_session(target: str, request_id: str, wait: float = 0) -> dict:
         return {'request': request}
 
 
-def quit_session(target: str, sender_session: str | None = None, confirm_unmanaged: bool = False) -> dict:
+def quit_session(target: str, sender_session: str | None = None, confirm_unmanaged: bool = False, *, expected_runtime_id: str | None = None) -> dict:
     record = _resolve(target)
+    if expected_runtime_id is not None and record['runtime_id'] != _canonical_id(expected_runtime_id):
+        raise LiveSessionError('Session runtime changed; it was not quit')
     _sender(sender_session)
     if sender_session == record['session_id']:
         raise LiveSessionError('Use native /quit for your own session')

@@ -30,7 +30,7 @@ function atomic(file: string, record: any) {
 export default function (pi: ExtensionAPI) {
   let ctx: ExtensionContext | undefined, server: net.Server | undefined;
   let sessionId = "", runtimeId = "", registry = "", socketFile = "", messages = "";
-  let busy = false, compacting = false, active: any;
+  let busy = false, compacting = false, closing = false, initialRequest = "", active: any;
   let queue: any[] = [], pumpTimer: ReturnType<typeof setTimeout> | undefined;
   const peers = new Set<net.Socket>();
   const waiters = new Map<string, Set<() => void>>();
@@ -42,10 +42,11 @@ export default function (pi: ExtensionAPI) {
       kind: process.env.PIPAL_AGENT_DIR ? "pipal" : "pi",
       agent: path.basename(process.env.PIPAL_AGENT_DIR || ""), topic: process.env.PIPAL_AGENT_DIR ? process.env.PIPAL_TOPIC || "main" : "",
       directory: ctx?.cwd || "", session_file: ctx?.sessionManager.getSessionFile() || null,
-      name: pi.getSessionName() || "", pid: process.pid, busy: busy || compacting || !ctx?.isIdle(),
+      name: pi.getSessionName() || "", pid: process.pid, busy: busy || compacting || !!initialRequest || !ctx?.isIdle(),
       pending: queue.length, model: ctx?.model?.id || "", provider: ctx?.model?.provider || "",
       managed, managed_name: managed ? process.env.PIPAL_MANAGED_TMUX : null,
-      created_by: managed && UUID.test(process.env.PIPAL_SESSION_CREATOR || "") ? process.env.PIPAL_SESSION_CREATOR : null,
+      created_by: UUID.test(process.env.PIPAL_SESSION_CREATOR || "") ? process.env.PIPAL_SESSION_CREATOR : null,
+      execution: process.env.PIPAL_SESSION_EXECUTION === "headless" ? "headless" : ctx?.mode || "tui", closing,
       attach_command: managed ? `pipal live attach ${sessionId}` : null };
   };
   const publish = () => { if (ctx && registry) atomic(registry, { ...metadata(), _socket: socketFile }); };
@@ -88,6 +89,8 @@ export default function (pi: ExtensionAPI) {
     if (!ctx || request.protocol !== 1 || request.session_id !== sessionId || request.runtime_id !== runtimeId) throw new Error("Session identity changed; discover it again before sending");
     if (request.op === "inspect") { publish(); return { session: metadata() }; }
     if (request.op === "message") {
+      if (closing) throw new Error("Session is ending; no message was sent");
+      if (initialRequest && request.request_id !== initialRequest) throw new Error("Session is starting its reserved request; discover readiness before sending");
       if (typeof request.text !== "string" || !request.text.trim() || request.text.length > 32768) throw new Error("Message must contain 1–32768 characters");
       const file = recordPath(request.request_id);
       if (!request.sender || (request.sender.session_id !== null && !UUID.test(request.sender.session_id || ""))) throw new Error("Invalid sender identity");
@@ -101,7 +104,7 @@ export default function (pi: ExtensionAPI) {
       const record = { request_id: request.request_id, session_id: sessionId, runtime_id: runtimeId,
         sender_session_id: request.sender.session_id, sender: request.sender, text: request.text,
         status: "queued", reply: "", created_at: new Date().toISOString() };
-      save(record); queue.push(record); publish(); schedulePump();
+      save(record); queue.push(record); initialRequest = ""; publish(); schedulePump();
       if (ctx.hasUI) ctx.ui.notify(`Message queued from ${request.sender.agent || request.sender.name || "another session"}`, "info");
       return { request: record };
     }
@@ -122,8 +125,10 @@ export default function (pi: ExtensionAPI) {
       });
     }
     if (request.op === "quit") {
-      if (busy || compacting || active || queue.length || !ctx.isIdle() || ctx.hasPendingMessages()) throw new Error("Session is busy or has queued work; it was not interrupted or quit");
+      if (closing) return { accepted: true, session_id: sessionId };
+      if (busy || compacting || initialRequest || active || queue.length || !ctx.isIdle() || ctx.hasPendingMessages()) throw new Error("Session is busy or has queued work; it was not interrupted or quit");
       // Respond before shutdown tears down the endpoint. No stdin or model call.
+      closing = true; publish();
       const shutdownContext = ctx;
       peer.once("finish", () => shutdownContext.shutdown());
       return { accepted: true, session_id: sessionId };
@@ -132,7 +137,8 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", async (_event, context) => {
     ctx = context; sessionId = context.sessionManager.getSessionId(); runtimeId = randomUUID();
-    busy = false; compacting = false; queue = []; active = undefined;
+    busy = false; compacting = false; closing = false; queue = []; active = undefined;
+    initialRequest = UUID.test(process.env.PIPAL_SESSION_INITIAL_REQUEST || "") ? process.env.PIPAL_SESSION_INITIAL_REQUEST! : "";
     try {
       if (!UUID.test(sessionId)) throw new Error("Invalid native session UUID");
       fs.mkdirSync(home, { recursive: true });

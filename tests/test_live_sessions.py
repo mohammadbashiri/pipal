@@ -94,6 +94,15 @@ def test_list_inspect_message_and_sender_identity(runtime):
         assert sent['text'] == '--literal 🧠 text'
         assert sent['sender']['session_id'] == source.session_id
         assert sent['runtime_id'] == target.runtime_id
+        delivered = len([request for request in target.requests if request['op'] == 'message'])
+        with pytest.raises(live.LiveSessionError, match='runtime changed'):
+            live.message_session(target.session_id, 'do not deliver', expected_runtime_id=str(uuid4()))
+        with pytest.raises(live.LiveSessionError, match='runtime changed'):
+            live.quit_session(target.session_id, expected_runtime_id=str(uuid4()))
+        assert len([request for request in target.requests if request['op'] == 'message']) == delivered
+        assert not any(request['op'] == 'quit' for request in target.requests)
+        with pytest.raises(live.LiveSessionError, match='Captured sender'):
+            live.message_session(target.session_id, 'invalid attribution', sender_snapshot={'session_id': source.session_id})
         with pytest.raises(live.LiveSessionError, match='itself'):
             live.message_session(source.session_id, 'self', source.session_id)
         with pytest.raises(live.LiveSessionError):

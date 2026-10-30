@@ -9,9 +9,18 @@ import pytest
 
 from pipal import delegation_worker
 from pipal.delegation_worker import request_cancel, run_job
+from tests.fake_live_pi import wrap_native
+
+
+@pytest.fixture(autouse=True)
+def isolated_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv('PIPAL_HOME', str(tmp_path / 'runtime-home'))
 
 
 def _job(tmp_path, *, job_id="dg-test", native_pi=None):
+    executable = Path(native_pi or tmp_path / 'fake-pi')
+    if executable.is_file() and not executable.with_name(executable.name + '.payload').exists():
+        wrap_native(executable)
     transcript = tmp_path / "transcript.jsonl"
     transcript.touch()
     prompt = tmp_path / "prompt.md"
@@ -25,7 +34,7 @@ def _job(tmp_path, *, job_id="dg-test", native_pi=None):
     }
 
 
-@pytest.mark.parametrize("post_exit_drain", [False, True], ids=["live-stream", "post-exit-drain"])
+@pytest.mark.parametrize("post_exit_drain", [False, True], ids=["live-stream", "buffered-batch"])
 def test_background_delegation_worker_completes_and_persists_result(tmp_path, monkeypatch, post_exit_drain):
     fake_pi = tmp_path / "fake-pi"
     fake_pi.write_text(
@@ -36,7 +45,7 @@ def emit(event):
     global sequence
     sequence += 1
     print(json.dumps(event), flush=True)
-    ack_dir = os.environ.get("PIPAL_TEST_ACK_DIR")
+    ack_dir = os.environ.get("SESSION_TEST_ACK_DIR")
     if ack_dir:
         # Keep the child alive until the worker has consumed each event.
         ack = pathlib.Path(ack_dir) / str(sequence)
@@ -61,26 +70,19 @@ emit({"type": "message_end", "message": message})
     job_file = tmp_path / "job.json"
     job_file.write_text(json.dumps(job), encoding="utf-8")
 
-    monkeypatch.delenv("PIPAL_TEST_ACK_DIR", raising=False)
-    if post_exit_drain:
-        # Force all events through the post-exit drain.
-        popen = subprocess.Popen
-        def start_and_wait(*args, **kwargs):
-            proc = popen(*args, **kwargs)
-            proc.wait(timeout=5)
-            return proc
-        monkeypatch.setattr(delegation_worker.subprocess, "Popen", start_and_wait)
-    else:
+    monkeypatch.delenv("SESSION_TEST_ACK_DIR", raising=False)
+    if not post_exit_drain:
         ack_dir = tmp_path / "acks"
         ack_dir.mkdir()
-        monkeypatch.setenv("PIPAL_TEST_ACK_DIR", str(ack_dir))
+        monkeypatch.setenv("SESSION_TEST_ACK_DIR", str(ack_dir))
         append_job_event = delegation_worker._append_job_event
         consumed = 0
         def acknowledge_event(path, event):
             nonlocal consumed
             append_job_event(path, event)
-            consumed += 1
-            (ack_dir / str(consumed)).touch()
+            if event['type'] in ('tool_execution_start', 'tool_execution_end') or (event['type'] == 'message_end' and event.get('message', {}).get('role') == 'assistant'):
+                consumed += 1
+                (ack_dir / str(consumed)).touch()
         monkeypatch.setattr(delegation_worker, "_append_job_event", acknowledge_event)
 
     assert run_job(job_file) == 0
@@ -90,10 +92,12 @@ emit({"type": "message_end", "message": message})
     assert completed["result"] == "completed artifact"
     streamed = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
     assert [event["type"] for event in streamed] == [
-        "tool_execution_start",
-        "tool_execution_end",
-        "message_end",
+        'session_request_started', 'message_start', 'message_end', 'tool_execution_start', 'tool_execution_end',
+        'message_end', 'agent_settled', 'session_result',
     ]
+    assert completed['live_session']['request_id'] == streamed[0]['request_id']
+    assert completed['live_session']['session_id'] == streamed[0]['session']['session_id']
+    assert streamed[-1]['request']['status'] == 'completed'
     events = [json.loads(line) for line in transcript.read_text().splitlines()]
     messages = [(event["author"], event["content"]) for event in events if event["type"] == "message"]
     assert messages == [("sasha", "finish the artifact"), ("ada", "completed artifact")]
@@ -136,6 +140,28 @@ def test_worker_uses_job_root_as_the_single_durable_completion_source(tmp_path):
     terminal = json.loads(job_file.read_text())
     assert terminal["status"] == "completed"
     assert not list(tmp_path.rglob("completions.jsonl"))
+
+
+def test_background_delivery_survives_primary_exit_with_captured_attribution(tmp_path):
+    from uuid import uuid4
+    from pipal.live_sessions import result_session, list_sessions
+    fake_pi = tmp_path / 'fake-pi'
+    fake_pi.write_text('#!/usr/bin/env python3\nimport json\nprint(json.dumps({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"survived primary exit"}]}}),flush=True)\n')
+    fake_pi.chmod(0o755)
+    job = _job(tmp_path, native_pi=fake_pi)
+    source = str(uuid4())
+    job.update(source_session_id=source, source_snapshot={'session_id': source, 'agent': 'sasha', 'topic': 'main', 'kind': 'pipal'})
+    path = tmp_path / 'job.json'; path.write_text(json.dumps(job))
+    assert list_sessions() == [], 'No primary runtime exists'
+    assert run_job(path) == 0
+    completed = json.loads(path.read_text())
+    assert completed['status'] == 'completed'
+    reference = completed['live_session']
+    request = result_session(reference['session_id'], reference['request_id'])['request']
+    assert request['sender_session_id'] == source
+    assert request['sender']['agent'] == 'sasha'
+    assert request['sender']['attribution'] == 'captured-at-launch'
+    assert list_sessions() == []
 
 
 def test_cancellation_cannot_be_overwritten_during_worker_claim(tmp_path, monkeypatch):

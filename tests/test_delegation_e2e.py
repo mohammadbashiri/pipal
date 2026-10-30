@@ -2,10 +2,12 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import pytest
+from tests.fake_live_pi import wrap_native
 
 
 PI = shutil.which("pi")
@@ -49,6 +51,7 @@ print(json.dumps({"type": "message_end", "message": message}), flush=True)
         encoding="utf-8",
     )
     fake_pi.chmod(0o755)
+    wrap_native(fake_pi)
 
     runtime = {
         "schema_version": 1,
@@ -57,6 +60,7 @@ print(json.dumps({"type": "message_end", "message": message}), flush=True)
         "topic": "main",
         "working_dir": str(working_dir),
         "native_pi": str(fake_pi),
+        "worker_python": sys.executable,
         "agent_timeout_seconds": 5,
         "max_turns": 4,
         "delegates": [
@@ -76,6 +80,9 @@ print(json.dumps({"type": "message_end", "message": message}), flush=True)
     runtime_file.write_text(json.dumps(runtime), encoding="utf-8")
     env = os.environ.copy()
     env["PIPAL_DELEGATION_RUNTIME"] = str(runtime_file)
+    home = tmp_path / 'home'
+    (home / '.pi/agent').mkdir(parents=True)
+    env.update(HOME=str(home), PI_CODING_AGENT_DIR=str(home / '.pi/agent'), PIPAL_HOME=str(home / '.pipal'))
     proc = subprocess.Popen(
         [PI, "--mode", "rpc", "--no-session", "--no-tools", "--extension", str(EXTENSION)],
         stdin=subprocess.PIPE,

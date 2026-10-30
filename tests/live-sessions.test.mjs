@@ -8,10 +8,13 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import liveExtension from '../src/pipal/extensions/live_sessions.ts';
 
-async function fixture(home, id = randomUUID(), kind = 'pipal') {
-  const previous = {PIPAL_HOME:process.env.PIPAL_HOME,PIPAL_AGENT_DIR:process.env.PIPAL_AGENT_DIR,PIPAL_TOPIC:process.env.PIPAL_TOPIC};
+async function fixture(home, id = randomUUID(), kind = 'pipal', initialRequest, creator) {
+  const previous = Object.fromEntries(['PIPAL_HOME','PIPAL_AGENT_DIR','PIPAL_TOPIC','PIPAL_SESSION_INITIAL_REQUEST','PIPAL_SESSION_EXECUTION','PIPAL_SESSION_CREATOR'].map(key=>[key,process.env[key]]));
   process.env.PIPAL_HOME=home;process.env.PIPAL_AGENT_DIR=path.join(home,'agents','recipient');process.env.PIPAL_TOPIC='fixture';
   if(kind==='pi')delete process.env.PIPAL_AGENT_DIR;
+  for(const [key,value] of Object.entries({PIPAL_SESSION_INITIAL_REQUEST:initialRequest,PIPAL_SESSION_EXECUTION:initialRequest?'headless':undefined,PIPAL_SESSION_CREATOR:creator})){
+    if(value===undefined)delete process.env[key];else process.env[key]=value;
+  }
   const hooks=new Map(), sent=[], dispatch=new EventEmitter();let idle=true, quits=0;
   const ctx={cwd:home,hasUI:false,isIdle:()=>idle,hasPendingMessages:()=>false,shutdown:()=>quits++,sessionManager:{getSessionId:()=>id,getSessionFile:()=>path.join(home,'native.jsonl')}};
   const pi={events:dispatch,on:(name,handler)=>hooks.set(name,handler),getSessionName:()=> 'Fixture session',sendMessage:(message,options)=>{sent.push({message,options});dispatch.emit('message',message);}};
@@ -55,6 +58,24 @@ for(const kind of ['pipal','pi']) test(`${kind}: runtime discovery, identity, qu
   assert.equal((await f.rpc('message',{request_id,text,sender})).request.status,'completed');assert.equal(f.sent.length,1,'Never redeliver the same request');
   assert.equal((await f.rpc('quit')).accepted,true);
   await new Promise(resolve=>setImmediate(resolve));assert.equal(f.quits(),1);
+ }finally{await f?.close();fs.rmSync(home,{recursive:true,force:true});}
+});
+
+test('headless startup reserves the initial request; idle quit atomically stops new delivery',async()=>{
+ const home=fs.mkdtempSync(path.join(os.tmpdir(),'pipal-headless-reservation-'));let f;
+ try{
+  const request_id=randomUUID(),creator=randomUUID();f=await fixture(home,undefined,'pi',request_id,creator);
+  const state=(await f.rpc('inspect')).session;
+  assert.equal(state.execution,'headless');assert.equal(state.created_by,creator);assert.equal(state.managed,false);assert.equal(state.busy,true);
+  assert.match((await f.rpc('message',{request_id:randomUUID(),text:'Do not preempt startup',sender})).error,/reserved request/);
+  assert.match((await f.rpc('quit')).error,/busy/);
+  const delivered=once(f.dispatch,'message');await f.rpc('message',{request_id,text:'Initial work',sender});await delivered;
+  await f.hooks.get('message_end')({message:{role:'assistant',content:[{type:'text',text:'Done'}],stopReason:'stop'}});
+  await f.hooks.get('agent_settled')();assert.equal((await f.rpc('result',{request_id})).request.status,'completed');
+  assert.equal((await f.rpc('quit')).accepted,true);
+  assert.equal((await f.rpc('inspect')).session.closing,true);
+  assert.match((await f.rpc('message',{request_id:randomUUID(),text:'Too late',sender})).error,/ending/);
+  assert.equal((await f.rpc('quit')).accepted,true);
  }finally{await f?.close();fs.rmSync(home,{recursive:true,force:true});}
 });
 

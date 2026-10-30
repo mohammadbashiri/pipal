@@ -64,6 +64,16 @@ Available members run in parallel with their team roles. The primary remains acc
 
 Direct `@team:<name>` input addresses all available members. During a joined delegation, bare `@team` addresses that delegation's participants.
 
+## Shared session foundation
+
+Delegation is a higher-level workflow over the [shared Pi/Pipal session primitives](live-sessions.md). Both foreground and background turns use `session_worker.py`: one bounded native **RPC** process, the shared presence registry, idle inbox, durable request/result records, and exact runtime-bound shutdown. There is no separate print-prompt delivery path and no forced tmux/TUI for workers. The normal session advisory lock prevents concurrent writers.
+
+Delegation still owns persona/task instructions, persistent threads and isolated background snapshots, job leases, owner-approved cancellation, joined follow-ups, reviews and reports. Cancellation may abort its own active worker; ordinary cross-session Quit continues to refuse busy work. Native tool/text/usage events stream for the delegated request only. Other peer requests can queue and drain within the worker's existing timeout, but never become the delegation's answer or extend its lifetime indefinitely.
+
+Foreground results and completed transcript messages carry `live_session`; background `job.json` and status include it as soon as startup succeeds. Its native `session_id`, `runtime_id` and durable `request_id` link delegation evidence to the same session/result APIs used elsewhere. This reference is persisted before first delivery, including uncertain acknowledgements. No delivery is automatically retried.
+
+Background launch captures peer attribution so closing the primary TUI does not invalidate already-approved work. Captured identity is **not** owner approval. Headless UI confirmation/input requests are cancelled rather than auto-approved; agents must return a blocker when human consent is needed. Completion remains passive and never starts a primary model turn. Existing job files, transcripts, session histories and reports remain readable; no historical records are migrated or rewritten.
+
 ## Foreground and background modes
 
 Visible foreground work is the default. It keeps tool activity transparent and interruptible. When the owner explicitly asks to run a long independent task in the background, the primary can set `mode: "background"` on `pipal_delegate`. Pipal returns a durable `dg-...` job id immediately, runs the delegate in a detached worker with an isolated native session, and shows a passive completion notice in the TUI even if the original TUI was closed and reopened.

@@ -4,13 +4,13 @@ import argparse
 import fcntl
 import json
 import os
-import selectors
 import signal
 import subprocess
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .session_worker import run_session
 
 CLAIM_LEASE_SECONDS = 60 * 60
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -148,6 +148,24 @@ def _finalize(job_file: Path, status: str, **values: Any) -> dict[str, Any]:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+def _annotate_session(job_file: Path, reference: dict) -> None:
+    """Attach shared-runtime provenance without replacing concurrent job state."""
+    lock_file = job_file.parent / ".finalize.lock"
+    lock_file.touch(exist_ok=True)
+    blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
+    try:
+        with lock_file.open("r+") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                current = _load_job(job_file)
+                current["live_session"] = reference
+                _write_job(job_file, current)
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+
+
 def request_cancel(job_file: Path) -> dict[str, Any]:
     """Persist a cancellation request and choose the terminal outcome under lock."""
     marker = job_file.parent / "cancel-requested.json"
@@ -186,35 +204,28 @@ def run_job(job_file: Path) -> int:
     if job.get("acceptance_criteria"):
         prompt_parts += ["", "Acceptance criteria:", job["acceptance_criteria"]]
     prompt_parts += ["", "Complete the work independently and return concrete results, artifacts, verification, or a precise blocker."]
-    args = [job["native_pi"], "--mode", "json", "--session", job["session_file"], "--append-system-prompt", delegate["prompt_file"]]
-    if delegate.get("provider"):
-        args += ["--provider", delegate["provider"]]
-    if delegate.get("model"):
-        args += ["--model", delegate["model"]]
-    args += ["-p", "\n".join(prompt_parts)]
-    env = os.environ.copy()
-    env.update(PIPAL_AGENT_DIR=delegate["agent_path"], PIPAL_TOPIC=job["topic"], PIPAL_DISABLE_AUTOGREET="1")
+    request = {
+        "native_pi": job["native_pi"], "session_file": job["session_file"],
+        "directory": job["working_dir"], "prompt_file": delegate["prompt_file"],
+        "agent_directory": delegate["agent_path"], "topic": job["topic"],
+        "provider": delegate.get("provider"), "model": delegate.get("model"),
+        "sender_session": job.get("source_session_id"),
+        "sender_snapshot": job.get("source_snapshot") or {"session_id": job.get("source_session_id"), "kind": "pipal", "agent": job['primary'], "topic": job['topic']},
+        "timeout_seconds": job.get("timeout_seconds", 300), "text": "\n".join(prompt_parts),
+    }
+    live_session = None
     final_text = ""
     lineage = _lineage(job)
     _append_thread(job, {"type": "message", "author": job["primary"], "content": job["message"], "acceptance_criteria": job.get("acceptance_criteria"), "background_job": job["id"], "delegation_id": job.get("delegation_id", job["id"]), "team": job.get("team"), **lineage})
     try:
-        proc = subprocess.Popen(args, cwd=job["working_dir"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        active_process[0] = proc
-        selector = selectors.DefaultSelector()
-        assert proc.stdout is not None
-        selector.register(proc.stdout, selectors.EVENT_READ)
-        deadline = time.monotonic() + int(job.get("timeout_seconds", 300))
-        diagnostic: list[str] = []
-
-        def process_line(line: str) -> None:
-            nonlocal final_text
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                diagnostic.append(line.strip())
-                return
+        for event in run_session(request, on_process=lambda proc: active_process.__setitem__(0, proc)):
             _append_job_event(job_file, {**event, **lineage})
-            if event.get("type") == "tool_execution_start":
+            if event.get("type") == "session_request_started":
+                live_session = {"session_id": event["session"]["session_id"], "runtime_id": event["session"]["runtime_id"], "request_id": event["request_id"]}
+                _annotate_session(job_file, live_session)
+            elif event.get("type") == "session_result":
+                final_text = event.get("final_text") or final_text
+            elif event.get("type") == "tool_execution_start":
                 _append_thread(job, {"type": "tool_call", "author": delegate["agent"], "tool": event.get("toolName"), "args": event.get("args", {}), "tool_call_id": event.get("toolCallId"), "delegation_id": job.get("delegation_id", job["id"]), "background_job": job["id"], **lineage})
             elif event.get("type") == "tool_execution_end":
                 result = event.get("result", {})
@@ -223,23 +234,9 @@ def run_job(job_file: Path) -> int:
             elif event.get("type") == "message_end":
                 final_text = _text(event.get("message", {})) or final_text
 
-        while proc.poll() is None:
-            if time.monotonic() >= deadline:
-                proc.terminate()
-                try: proc.wait(timeout=2)
-                except subprocess.TimeoutExpired: proc.kill()
-                raise TimeoutError
-            for key, _ in selector.select(timeout=0.2):
-                line = key.fileobj.readline()
-                if not line: continue
-                process_line(line)
-        for line in proc.stdout:
-            process_line(line)
-        if proc.returncode != 0:
-            raise RuntimeError("\n".join(filter(None, diagnostic[-3:])) or f"delegate exited with code {proc.returncode}")
-        completed = _finalize(job_file, "completed", result=final_text or "(no response)")
+        completed = _finalize(job_file, "completed", result=final_text or "(no response)", live_session=live_session)
         if completed.get("status") == "completed":
-            _append_thread(completed, {"type": "message", "author": delegate["agent"], "content": completed["result"], "background_job": completed["id"], "delegation_id": completed.get("delegation_id", completed["id"]), "team": completed.get("team"), **_lineage(completed)})
+            _append_thread(completed, {"type": "message", "author": delegate["agent"], "content": completed["result"], "background_job": completed["id"], "delegation_id": completed.get("delegation_id", completed["id"]), "team": completed.get("team"), "live_session": live_session, **_lineage(completed)})
         return 0
     except TimeoutError:
         _finalize(job_file, "failed", error=f"Timed out after {job.get('timeout_seconds', 300)}s")
