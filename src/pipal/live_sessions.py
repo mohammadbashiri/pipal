@@ -244,9 +244,6 @@ def start_session(agent: str | None, topic: str | None, directory: str, session:
     _sender(sender_session)
     if text is not None and (not text.strip() or len(text) > 32768):
         raise LiveSessionError('Initial message must contain 1–32768 characters')
-    tmux = shutil.which('tmux')
-    if not tmux:
-        raise LiveSessionError('tmux is required to start a handoff-capable session')
     saved = None
     if session:
         from .cli import _resolve_session_file, _session_header
@@ -266,6 +263,9 @@ def start_session(agent: str | None, topic: str | None, directory: str, session:
         native_id = _canonical_id(header.get('id'))
         if any(item['session_id'] == native_id for item in list_sessions()):
             raise LiveSessionError('That conversation is already running; message it instead of creating another writer')
+    tmux = shutil.which('tmux')
+    if not tmux:
+        raise LiveSessionError('tmux is required to start a handoff-capable session')
     launch_id = 'pipal-' + uuid4().hex[:16]
     endpoint = str(socket_root() / 'tmux.sock')
     environment = {

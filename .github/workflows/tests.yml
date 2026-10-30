@@ -61,6 +61,17 @@ jobs:
 
       - uses: astral-sh/setup-uv@v3
 
+      - name: Install handoff dependency (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install handoff dependency (macOS)
+        if: runner.os == 'macOS'
+        run: brew list tmux >/dev/null 2>&1 || brew install tmux
+
+      - name: Verify handoff dependency
+        run: tmux -V
+
       - name: Install pi
         run: npm install -g @earendil-works/pi-coding-agent@${{ matrix.pi_version }}
 

@@ -209,7 +209,10 @@ def test_resume_cannot_read_a_file_outside_selected_topic(runtime, tmp_path, mon
     assert outside.read_text() == '{"private":"must not be read"}'
 
 
-def test_plain_pi_rejects_persona_fields_and_invalid_saved_files(runtime, tmp_path):
+@pytest.mark.parametrize('tmux', [None, '/fake/tmux'], ids=['without-tmux', 'with-tmux'])
+def test_plain_pi_rejects_persona_fields_and_invalid_saved_files(runtime, tmp_path, monkeypatch, tmux):
+    monkeypatch.setattr(live.shutil, 'which', lambda name: tmux)
+    monkeypatch.setattr(live.subprocess, 'run', lambda *args, **kwargs: pytest.fail('Invalid input must not launch a process'))
     with pytest.raises(live.LiveSessionError, match='do not have'):
         live.start_session('fixture', None, str(tmp_path), kind='pi')
     with pytest.raises(live.LiveSessionError, match='do not have'):
@@ -218,6 +221,19 @@ def test_plain_pi_rejects_persona_fields_and_invalid_saved_files(runtime, tmp_pa
     file.write_text('{"type":"not-session"}')
     with pytest.raises(live.LiveSessionError, match='not a native Pi'):
         live.start_session(None, None, str(tmp_path), session=str(file), kind='pi')
+
+
+@pytest.mark.parametrize('resume', [False, True], ids=['new', 'resume'])
+def test_valid_plain_pi_requires_tmux_without_launching(runtime, tmp_path, monkeypatch, resume):
+    monkeypatch.setattr(live.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(live.subprocess, 'run', lambda *args, **kwargs: pytest.fail('Missing tmux must not launch a process'))
+    saved = tmp_path / 'session.jsonl'
+    saved.write_text(json.dumps({'type': 'session', 'id': str(uuid4())}) + '\n')
+    before = saved.read_bytes()
+    with pytest.raises(live.LiveSessionError, match='tmux is required'):
+        live.start_session(None, None, str(tmp_path), session=str(saved) if resume else None, kind='pi')
+    assert saved.read_bytes() == before
+    assert live.list_sessions() == []
 
 
 def test_session_tools_and_bootstrap_regressions():
