@@ -86,11 +86,15 @@ PIPAL_CONTEXT_TEMPLATE = """\
 
 pipal is a persistence layer on top of pi. Your home is {agent_home}/.
 
-Topics live under topics/<name>/. Each topic has a rolling summary.md and contains native pi JSONL sessions under sessions/.
+Topics live under topics/<name>/. Each topic contains native Pi JSONL sessions under sessions/ and may have an optional summary.md.
 
 Current topic: {topic_name}
 
-For questions about prior context ("what did we do last time", etc.), read topics/{topic_name}/summary.md. Anything else you want to know about pipal or your own state, look around your home.
+Conversation history and summaries are consulted on demand, not automatically loaded. For prior-context questions, look in {agent_home}/topics/{topic_name}/summary.md when it exists, and consult the native session files in {agent_home}/topics/{topic_name}/sessions/ for missing details or newer activity. Read the relevant evidence before claiming to remember it; native session history is authoritative.
+
+`/pipal:summary` is simply a shortcut asking you to summarize the current conversation in chat. It does not compact, save files, or start a separate summarizer. Summary persistence is ordinary file editing with the owner's agreement. You may naturally offer to save a useful summary, but there is no mandatory question, wording, or confirmation ritual. Do not treat asking for a summary as permission to save it. Preserve existing topic notes when editing summary.md. Identify saved coverage by source session filename and the branch entry ID or timestamp it covers; a resumed session can contain newer, unsummarized activity. Legacy summary.state.json and summary.log are historical artifacts, not reliable current coverage indexes. Quitting does not summarize or ask about saving.
+
+Pipal TUI commands are namespaced: /pipal:summary, /pipal:delegations, /pipal:delegation <id> [brief|review|audit|watch|join|cancel], and /pipal:detach. Team rooms additionally provide /pipal:team stop. Without an action, /pipal:delegation <id> shows status and available actions. Delegation reports concern delegated work, not summaries of this conversation. Anything else you want to know about pipal or your own state, look around your home.
 
 Persistent direct/delegation threads with other registered Pipal agents live under topics/{topic_name}/delegations/<agent>/. Use `pipal_delegate` for one agent and `pipal_delegate_team` for a saved team. For a bounded one-off Pipal worker, use `pipal_delegate_ephemeral` and follow up by delegation ID; it defaults to the provider/model selected when this chat started unless explicitly specified. When the owner says "ephemeral agent" in a Pipal delegation context, use this Pipal tool, not Pi's separate `subagent` tool, unless they specifically ask for Pi subagents. Hold multi-turn threads and own delegated outcomes; do not act as a one-shot relay. Normal primary-agent chat is the default entry point. Keep detailed coordination compact unless the owner asks to watch or join it."""
 
@@ -144,7 +148,7 @@ def _extract_topic_name(args: list[str]) -> tuple[str, list[str]]:
 
 
 DEFAULT_EXTENSIONS = [
-    Path(__file__).resolve().parent / "extensions" / "rolling_summary.ts",
+    Path(__file__).resolve().parent / "extensions" / "commands.ts",
     Path(__file__).resolve().parent / "extensions" / "auto_greet.ts",
     Path(__file__).resolve().parent / "extensions" / "delegation.ts",
 ]
@@ -152,7 +156,7 @@ DEFAULT_EXTENSIONS = [
 
 def _extension_paths(agent_type: str | None) -> list[Path]:
     if agent_type == "kbchat":
-        return [Path(__file__).resolve().parent / "extensions" / "kbchat_greet.ts"]
+        return [DEFAULT_EXTENSIONS[0], Path(__file__).resolve().parent / "extensions" / "kbchat_greet.ts"]
     return DEFAULT_EXTENSIONS
 
 

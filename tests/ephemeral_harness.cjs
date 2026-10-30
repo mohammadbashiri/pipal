@@ -37,8 +37,8 @@ Module.prototype.require = function(name) {
 };
 const mod = new Module(ext, module); mod.filename = ext; mod.paths = module.paths; mod._compile(output, ext);
 Module.prototype.require = originalRequire;
-const tools = new Map();
-const pi = {registerTool: t => tools.set(t.name, t), registerCommand() {}, registerEntryRenderer() {}, registerMessageRenderer() {}, on() {}};
+const tools = new Map(), commands = new Map(), requests = [], entries = [];
+const pi = {registerTool: t => tools.set(t.name, t), registerCommand: (name, config) => commands.set(name, config), sendMessage: (...args) => requests.push(args), appendEntry: (...args) => entries.push(args), registerEntryRenderer() {}, registerMessageRenderer() {}, on() {}};
 mod.exports.default(pi);
 (async () => {
   const tool = tools.get('pipal_delegate_ephemeral');
@@ -133,5 +133,43 @@ mod.exports.default(pi);
   assert.equal(piRecord.model, undefined);
   const modelOnly = await tools.get('pipal_delegate_ephemeral').execute('15', {message: 'inspect', model: 'explicit-only', mode: 'foreground'}, undefined);
   assert.match(modelOnly.details.text, /using explicit-only/);
-  console.log('ephemeral and persistent override lifecycles ok');
+  assert.deepEqual([...commands.keys()].sort(), ['pipal:delegation', 'pipal:delegations', 'pipal:detach']);
+  const notices = [], ctx = {ui: {notify: (text, level) => notices.push({text, level})}};
+  const command = commands.get('pipal:delegation');
+  await command.handler(bgId, ctx);
+  assert.match(notices.at(-1).text, /completed/);
+  assert.match(notices.at(-1).text, /Actions:.*brief.*review.*audit.*watch.*join.*cancel/);
+  assert.equal(requests.length, 0, 'Status must not start a model turn');
+  await commands.get('pipal:delegations').handler('', ctx);
+  assert.ok(notices.at(-1).text.includes(bgId));
+  assert.deepEqual(command.getArgumentCompletions(`${bgId} br`), [{value: `${bgId} brief`, label: `${bgId} brief`}]);
+  for (const action of ['watch', 'join']) {
+    await command.handler(`${bgId} ${action}`, ctx);
+    assert.match(notices.at(-1).text, action === 'watch' ? /Watching/ : /Joined/);
+    await commands.get('pipal:detach').handler('', ctx);
+    assert.match(notices.at(-1).text, /Detached/);
+  }
+  await command.handler(`${bgId} cancel`, ctx); // Completed job: never kill a process.
+  for (const bad of ['', '../outside watch', `${bgId} surprise`, `${bgId} watch --refresh`, `${bgId} brief --bad`, `${bgId} brief --refresh extra`]) {
+    await command.handler(bad, ctx);
+    assert.match(notices.at(-1).text, /Usage:/);
+  }
+  assert.equal(requests.length, 0);
+  for (const kind of ['brief', 'review', 'audit']) {
+    const count = requests.length;
+    await command.handler(`${bgId} ${kind}`, ctx);
+    assert.equal(requests.length, count + 1);
+    assert.equal(requests.at(-1)[0].details.report_kind, kind);
+    assert.equal(requests.at(-1)[0].details.delegation_id, bgId);
+    assert.equal(requests.at(-1)[1].triggerTurn, true);
+    await command.handler(`${bgId} ${kind}`, ctx);
+    assert.equal(requests.length, count + 1, 'Do not duplicate an in-progress report');
+    await tools.get('pipal_save_report').execute('report', {report_kind: kind, delegation_id: bgId, decision: 'Fixture complete', report_markdown: '# Fixture report'});
+    await command.handler(`${bgId} ${kind}`, ctx);
+    assert.equal(requests.length, count + 1, 'Saved reports open without another model call');
+    assert.equal(entries.at(-1)[0], 'pipal-delegation-report');
+    await command.handler(`${bgId} ${kind} --refresh`, ctx);
+    assert.equal(requests.length, count + 2, 'Only explicit refresh regenerates a saved report');
+  }
+  console.log('ephemeral and persistent override lifecycles ok; namespaced delegation commands ok');
 })().catch(e => { console.error(e); process.exitCode = 1; }).finally(() => fs.rmSync(dir, {recursive: true, force: true}));

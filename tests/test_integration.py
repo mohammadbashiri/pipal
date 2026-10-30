@@ -198,7 +198,8 @@ class TestRunnerHelpers:
     def test_extension_paths_default(self):
         paths = _extension_paths(None)
         assert any("auto_greet" in str(p) for p in paths)
-        assert any("rolling_summary" in str(p) for p in paths)
+        assert any(p.name == "commands.ts" for p in paths)
+        assert not any("rolling_summary" in str(p) for p in paths)
         assert not any("model_recovery" in str(p) for p in paths)
 
     def test_extension_paths_kbchat(self):
@@ -206,77 +207,13 @@ class TestRunnerHelpers:
         assert any("kbchat_greet" in str(p) for p in paths)
         assert not any("auto_greet" in str(p) for p in paths)
 
-    def test_rolling_summary_app_quit_choices(self):
-        script = Path(__file__).with_name("summary-quit-bridge.test.mjs")
+    def test_conversational_commands(self):
+        script = Path(__file__).with_name("commands.test.mjs")
         result = subprocess.run(
             ["node", "--test", str(script)],
             check=False, capture_output=True, text=True, timeout=15,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-
-    def test_rolling_summary_lifecycle_policy(self):
-        extension = next(path for path in _extension_paths(None) if path.name == "rolling_summary.ts")
-        script = f"""
-            import {{ shouldInitializeSummarySession, shouldSummarizeOnShutdown }} from {json.dumps(extension.as_uri())};
-            const reasons = ["quit", "reload", "new", "resume", "fork"];
-            if (reasons.filter(shouldSummarizeOnShutdown).join() !== "quit") process.exit(1);
-            if (shouldInitializeSummarySession("reload")) process.exit(2);
-            if (!shouldInitializeSummarySession("startup")) process.exit(3);
-        """
-        result = subprocess.run(
-            ["node", "--experimental-strip-types", "--input-type=module", "--eval", script],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr
-
-        confirmation_script = f"""
-            import {{ confirmSummaryOnExit }} from {json.dumps(extension.as_uri())};
-            process.exit(confirmSummaryOnExit("Visible prompt") ? 0 : 4);
-        """
-        declined = subprocess.run(
-            ["node", "--experimental-strip-types", "--input-type=module", "--eval", confirmation_script],
-            input="n\n",
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        assert declined.returncode == 4, declined.stderr
-        assert "Visible prompt [y/n]:" in declined.stdout
-
-        accepted = subprocess.run(
-            ["node", "--experimental-strip-types", "--input-type=module", "--eval", confirmation_script],
-            input="y\n",
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        assert accepted.returncode == 0, accepted.stderr
-
-        retry_script = f"""
-            import {{ confirmSummaryOnExit }} from {json.dumps(extension.as_uri())};
-            let reads = 0;
-            let waits = 0;
-            const confirmed = confirmSummaryOnExit(
-                "Retry prompt",
-                (buffer) => {{
-                    reads += 1;
-                    if (reads < 3) throw Object.assign(new Error("not ready"), {{ code: "EAGAIN" }});
-                    buffer.write("y");
-                    return 1;
-                }},
-                () => {{ waits += 1; }},
-            );
-            if (!confirmed || reads !== 3 || waits !== 2) process.exit(5);
-        """
-        retried = subprocess.run(
-            ["node", "--experimental-strip-types", "--input-type=module", "--eval", retry_script],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        assert retried.returncode == 0, retried.stderr
 
 
 # ── persona loading integration ──────────────────────────────────
@@ -303,9 +240,9 @@ class TestPersonaIntegration:
         summary_dir = default_agent / "topics" / "main"
         summary_dir.mkdir(parents=True)
         (summary_dir / "summary.md").write_text("## Goal\nTest the system")
-        # Summary is loaded separately in run_agent, not in load_persona
-        # Just verify the file is there
-        assert (summary_dir / "summary.md").exists()
+        # Summaries are optional on-demand references, never injected at startup.
+        assert "Test the system" not in load_persona(str(default_agent))
+        assert (summary_dir / "summary.md").read_text() == "## Goal\nTest the system"
 
 
 # ── session file parsing ─────────────────────────────────────────

@@ -62,7 +62,7 @@ class PiRpcClient:
         ext_dir = self.settings.pipal_extensions_dir
         if ext_dir:
             greet_ext = "kbchat_greet.ts" if agent_type == "kbchat" else "auto_greet.ts"
-            for ext in ("rolling_summary.ts", greet_ext):
+            for ext in ("commands.ts", greet_ext):
                 ext_path = ext_dir / ext
                 if ext_path.exists():
                     cmd += ["--extension", str(ext_path)]

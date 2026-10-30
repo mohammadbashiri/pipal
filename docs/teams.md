@@ -37,7 +37,7 @@ The TUI keeps Pi's normal editor, tools, Markdown rendering, session behavior, a
 - `@team` and `@agent` autocomplete
 - role/model-labelled member responses
 - animated live activity spinner showing every currently working agent
-- Escape or `/team-stop` cancellation
+- Escape or `/pipal:team stop` cancellation
 - persistent timeout and failure events
 - agent-turn budgets to prevent loops
 
@@ -79,5 +79,5 @@ Agents are told where the shared transcript lives and what it represents. They i
 
 - one manager role and a flat team roster
 - no team-specific permissions or tool budgets yet
-- no team rolling-summary implementation yet
+- no team-specific summary command; ordinary agent-topic summaries remain optional, on-demand references
 - reopening restores message history but not historical tool-block rendering

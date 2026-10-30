@@ -87,22 +87,23 @@ Pipal distinguishes between two levels:
 ```
 topics/
   main/
-    summary.md
-    summary.state.json
+    summary.md  # optional agent-maintained reference
     topic.json
     sessions/
       20260329-183738_2698d110.jsonl
       20260330-091522_a1b2c3d4.jsonl
 ```
 
-A normal chat launch creates a new native pi session. The topic's `summary.md` carries continuity across those sessions, while the rolling-summary extension also injects recent messages from the previous session. Existing legacy `sessions/<topic>/` directories are migrated automatically. See [topics.md](topics.md) for the full command and storage model.
+A normal chat launch creates a new native Pi session. The topic's optional `summary.md` is an on-demand reference edited through ordinary agent tools with the owner's agreement. Pipal injects instructions about locations and coverage, not summary text or previous-session messages. Native history remains authoritative; shutdown does not summarize, compact, or ask for confirmation. Existing legacy `sessions/<topic>/` directories are migrated automatically. See [topics.md](topics.md) for the full command and storage model.
 
 ## Extensions
 
-pipal ships three pi extensions (TypeScript):
+Pipal ships Pi extensions (TypeScript), including:
 
 - **auto_greet.ts** — detects first-run vs returning user and sends appropriate greeting instruction. Uses the `onboarding.md` checklist to determine first-run status.
-- **rolling_summary.ts** — on pi session shutdown, compacts the session and updates the containing topic's `summary.md`. It also loads recent messages from the previous pi session at startup.
+- **commands.ts** — `/pipal:summary` submits an ordinary conversational summary request. No file writes, lifecycle interception, compaction or separate model calls.
+- **delegation.ts** — namespaced delegation commands and tools, durable work and reports.
+- **team_chat.ts** — team-room routing and `/pipal:team stop`.
 - **kbchat_greet.ts** — greeting for kbchat agents. Reads KB config and includes KB name in the greeting.
 
 Extensions are loaded via `--extension` when launching pi.

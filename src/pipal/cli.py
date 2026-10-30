@@ -9,7 +9,6 @@ from .team_runner import run_team_chat
 from .team_storage import create_team, list_teams, load_team, remove_team, team_dir
 from .channel_runner import run_channel_chat
 from .channel_storage import create_channel, list_channels, load_channel, remove_channel, channel_dir
-from .topic_summary import summarize_topic
 from .topic_storage import topics_root, topic_dir, topic_sessions_dir, validate_topic_name
 from .check_pi_compatibility import run_doctor
 
@@ -128,10 +127,6 @@ def build_parser():
 
     topic_list = topic_sub.add_parser("list", help="List topics for an agent")
     topic_list.add_argument("--agent", required=True, help="Agent name")
-
-    topic_sum = topic_sub.add_parser("summarize", help="Update a topic's rolling summary")
-    topic_sum.add_argument("--agent", required=True, help="Agent name")
-    topic_sum.add_argument("--topic", dest="topic_name", default="main", help="Topic name (default: main)")
 
     topic_remove = topic_sub.add_parser("remove", help="Remove a topic and its pi sessions")
     topic_remove.add_argument("--agent", required=True, help="Agent name")
@@ -356,12 +351,6 @@ def main(argv=None):
         except ValueError as exc:
             print(f"[red]{exc}[/red]")
             return 2
-
-        if args.topic_cmd == "summarize":
-            result = summarize_topic(Path(agent["path"]), topic_name, {})
-            color = "green" if result.status == "OK" else "yellow"
-            print(f"[{color}]{result.status}[/{color}] {result.message}")
-            return 0 if result.status in {"OK", "SKIP"} else 2
 
         if args.topic_cmd == "remove":
             path = topics_root(agent["path"]) / topic_name

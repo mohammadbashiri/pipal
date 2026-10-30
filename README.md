@@ -22,7 +22,7 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 
 - identity, memory, and policy files for each agent
 - topics that persist independently of the working directory
-- native Pi sessions inside topics, with rolling summaries across chats
+- native Pi sessions inside topics, with optional, agent-maintained summaries
 - human-owned AI teams and channel-style shared multi-agent conversations in Pi's TUI
 - persistent direct agent messaging and outcome-owned delegation
 - an optional local HTTP/WS server
@@ -40,6 +40,14 @@ pipal agent chat my-agent --provider openai --model <model-id>
 ```
 
 There are no agent-specific model defaults or `agent set-llm` command. Legacy `llm.json` / `llm.local.json` files no longer select an agent's model and need not be edited or migrated. Explicit per-work model overrides remain available where supported; Pipal does not silently change providers or retry failed messages.
+
+### Conversation summaries
+
+`/pipal:summary` asks the agent to summarize the current conversation in chat. Optional words after the command focus the request. This is an ordinary agent turn, not a separate summarizer, compaction, or save workflow.
+
+Each topic may have a `summary.md` as a compact reference. Agents know its location and the native session directory and consult them when relevant; neither summaries nor previous-session messages are automatically injected. Saving is ordinary agent file editing with your agreement, handled conversationally—not a mandatory question or special confirmation UI. Saved notes should identify the source session and coverage point, since a resumed session can contain newer activity.
+
+`/quit` simply quits. Pipal no longer summarizes or asks about saving during shutdown. Existing summary files and legacy metadata are preserved, but old `summary.state.json` files are not used to decide current coverage. The old `pipal topic summarize` CLI is retired; see [topics](docs/topics.md).
 
 ## What pipal is not
 
@@ -88,7 +96,7 @@ Momo, have the researcher investigate this issue, validate the result, and repor
 Have product-team evaluate this in parallel and give me one synthesis.
 ```
 
-Use `/watch <dg-id>`, `/join <dg-id>`, and `/detach` to control visibility of background work. `/brief <dg-id>`, `/review <dg-id>`, and `/audit <dg-id>` provide durable executive, attributed decision-review, and full evidence-trace reports. Dedicated visible rooms remain available with `pipal team chat product-team --topic planning`.
+Use `/pipal:delegations` to list background work and `/pipal:delegation <dg-id>` for status and available actions. Add `watch` or `join` to follow its activity; `/pipal:detach` stops watching without cancelling. Add `brief`, `review`, or `audit` to create/open durable reports; add `cancel` to stop active workers. Dedicated visible rooms remain available with `pipal team chat product-team --topic planning`.
 
 For a flat shared room—where agents act only when mentioned—create a channel:
 
@@ -97,7 +105,7 @@ pipal channel create product --member momo:Builder --member reviewer:Reviewer
 pipal channel chat product --topic planning
 ```
 
-See [Pipal channels](docs/channels.md), [Pipal teams](docs/teams.md), and [delegation](docs/delegation.md) for direct messaging, persistent and one-off workers, background jobs, durable reports, and the accountable primary-agent review flow. [ClickClack integration](docs/clickclack.md) explains how to connect ClickClack bots to local Pipal agents. Delegation results are claims until the primary verifies them; `/brief`, `/review`, and `/audit` expose progressively more reporting detail.
+See [Pipal channels](docs/channels.md), [Pipal teams](docs/teams.md), and [delegation](docs/delegation.md) for direct messaging, persistent and one-off workers, background jobs, durable reports, and the accountable primary-agent review flow. [ClickClack integration](docs/clickclack.md) explains how to connect ClickClack bots to local Pipal agents. Delegation results are claims until the primary verifies them; the `brief`, `review`, and `audit` actions expose progressively more reporting detail.
 
 Docker support is **experimental**; local installation is the supported alpha path. See [Docker usage](docs/docker.md) for isolation and networking caveats.
 

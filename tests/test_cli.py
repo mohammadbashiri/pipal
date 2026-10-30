@@ -198,10 +198,10 @@ def test_parser_serve():
     assert args.read_only is True
 
 
-def test_parser_topic_summarize():
-    args = build_parser().parse_args(["topic", "summarize", "--agent", "momo", "--topic", "work"])
+def test_parser_topic_remove():
+    args = build_parser().parse_args(["topic", "remove", "--agent", "momo", "--topic", "work"])
     assert args.cmd == "topic"
-    assert args.topic_cmd == "summarize"
+    assert args.topic_cmd == "remove"
     assert args.topic_name == "work"
 
 

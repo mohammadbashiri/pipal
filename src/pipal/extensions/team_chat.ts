@@ -663,9 +663,11 @@ export default function teamChatExtension(pi: ExtensionAPI) {
     return { action: "handled" };
   });
 
-  pi.registerCommand("team-stop", {
-    description: "Cancel active team work",
-    handler: async (_args, ctx) => {
+  pi.registerCommand("pipal:team", {
+    description: "Control this team room: /pipal:team stop",
+    getArgumentCompletions: (prefix) => "stop".startsWith(prefix) ? [{ value: "stop", label: "stop" }] : null,
+    handler: async (args, ctx) => {
+      if (args.trim() !== "stop") return ctx.ui.notify("Usage: /pipal:team stop", "warning");
       if (!currentRoomAbort) {
         ctx.ui.notify("No team work is active", "info");
         return;

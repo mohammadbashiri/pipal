@@ -1000,7 +1000,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       if (fs.existsSync(marker)) continue;
       fs.mkdirSync(notificationDir, { recursive: true });
       fs.writeFileSync(marker, `${JSON.stringify({ delegation_id: id, notified_at: new Date().toISOString() })}\n`, "utf8");
-      notify?.(`Background delegation ${id} finished; use /delegations or pipal_delegation_status when you want to review it.`);
+      notify?.(`Background delegation ${id} finished; use /pipal:delegations or pipal_delegation_status when you want to review it.`);
     }
   };
 
@@ -1098,7 +1098,11 @@ export default function delegationExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("delegations", {
+  const actionNames = ["brief", "review", "audit", "watch", "join", "cancel"];
+  const delegationActions = new Map<string, Parameters<ExtensionAPI["registerCommand"]>[1]>();
+  const registerDelegationAction = (name: string, options: Parameters<ExtensionAPI["registerCommand"]>[1]) => delegationActions.set(name, options);
+
+  pi.registerCommand("pipal:delegations", {
     description: "Show background delegation jobs",
     handler: async (_args, ctx) => {
       const jobs = readBackgroundJobs();
@@ -1149,13 +1153,13 @@ Preserve disagreement, distinguish agent claims from verified facts, and referen
 
   const registerReportCommand = (command: ReportKind) => {
     const label = reportLabels[command];
-    pi.registerCommand(command, {
-      description: `Open or create a durable ${label}: /${command} <dg-id> [--refresh]`,
+    registerDelegationAction(command, {
+      description: `Open or create a durable ${label}`,
       handler: async (args, ctx) => {
         const parts = args.trim().split(/\s+/).filter(Boolean);
         const delegationId = parts.find((part) => part !== "--refresh") ?? "";
         const refresh = parts.includes("--refresh");
-        if (!validDelegationId(delegationId)) return ctx.ui.notify(`Usage: /${command} <dg-id> [--refresh]`, "warning");
+        if (!validDelegationId(delegationId)) return ctx.ui.notify(`Usage: /pipal:delegation <dg-id> ${command} [--refresh]`, "warning");
         const existing = loadReport(delegationId, command);
         if (existing && !refresh) {
           pi.appendEntry("pipal-delegation-report", { report_kind: command, delegation_id: delegationId, markdown: existing.markdown });
@@ -1190,11 +1194,11 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
   registerReportCommand("review");
   registerReportCommand("audit");
 
-  pi.registerCommand("cancel-delegation", {
-    description: "Cancel background delegated work: /cancel-delegation <dg-id>",
+  registerDelegationAction("cancel", {
+    description: "Cancel background delegated work",
     handler: async (args, ctx) => {
       const id = args.trim();
-      if (!id) return ctx.ui.notify("Usage: /cancel-delegation <dg-id>", "warning");
+      if (!id) return ctx.ui.notify("Usage: /pipal:delegation <dg-id> cancel", "warning");
       const jobs = readBackgroundJobs().filter((job) => job.id === id || job.delegation_id === id);
       if (jobs.length === 0) return ctx.ui.notify(`Unknown delegation ${id}`, "error");
       for (const job of jobs) {
@@ -1216,24 +1220,24 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
     },
   });
 
-  pi.registerCommand("watch", {
-    description: "Watch a background delegation: /watch <dg-id>",
+  registerDelegationAction("watch", {
+    description: "Watch a background delegation",
     handler: async (args, ctx) => {
       const id = args.trim();
-      if (!id) return ctx.ui.notify("Usage: /watch <dg-id>", "warning");
+      if (!id) return ctx.ui.notify("Usage: /pipal:delegation <dg-id> watch", "warning");
       const found = readBackgroundJobs().some((job) => job.id === id || job.delegation_id === id);
       if (!found) return ctx.ui.notify(`Unknown delegation ${id}`, "error");
       watchedDelegation = id;
       watchedOffsets.clear();
       reportWatchedEvents();
-      ctx.ui.notify(`Watching ${id}. Use /detach to stop watching; work continues.`, "info");
+      ctx.ui.notify(`Watching ${id}. Use /pipal:detach to stop watching; work continues.`, "info");
     },
   });
-  pi.registerCommand("join", {
-    description: "Watch and participate in delegated work: /join <dg-id>",
+  registerDelegationAction("join", {
+    description: "Watch and participate in delegated work",
     handler: async (args, ctx) => {
       const id = args.trim();
-      if (!id) return ctx.ui.notify("Usage: /join <dg-id>", "warning");
+      if (!id) return ctx.ui.notify("Usage: /pipal:delegation <dg-id> join", "warning");
       const found = readBackgroundJobs().some((job) => job.id === id || job.delegation_id === id);
       if (!found) return ctx.ui.notify(`Unknown delegation ${id}`, "error");
       watchedDelegation = id;
@@ -1243,7 +1247,7 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
       ctx.ui.notify(`Joined ${id}. Use @agent:<name> or @team; active turns receive interventions as follow-ups.`, "info");
     },
   });
-  pi.registerCommand("detach", {
+  pi.registerCommand("pipal:detach", {
     description: "Stop watching delegated work without cancelling it",
     handler: async (_args, ctx) => {
       if (!watchedDelegation) return ctx.ui.notify("No delegation is currently being watched", "info");
@@ -1252,6 +1256,30 @@ Then call pipal_save_report with report_kind ${command}, delegation_id ${delegat
       joinedDelegation = undefined;
       watchedOffsets.clear();
       ctx.ui.notify(`Detached from ${id}; work continues.`, "info");
+    },
+  });
+
+  pi.registerCommand("pipal:delegation", {
+    description: "Inspect a delegation or run brief, review, audit, watch, join, or cancel",
+    getArgumentCompletions: (prefix) => {
+      const match = /^(\S+)\s+(\S*)$/.exec(prefix);
+      const values = match
+        ? actionNames.filter(action => action.startsWith(match[2])).map(action => `${match[1]} ${action}`)
+        : [...new Set(readBackgroundJobs().map(job => job.delegation_id ?? job.id))].filter(id => id.startsWith(prefix));
+      return values.length ? values.map(value => ({ value, label: value })) : null;
+    },
+    handler: async (args, ctx) => {
+      const [id, action, ...flags] = args.trim().split(/\s+/);
+      const usage = "Usage: /pipal:delegation <dg-id> [brief|review|audit|watch|join|cancel] [--refresh for reports]";
+      if (!validDelegationId(id ?? "")) return ctx.ui.notify(usage, "warning");
+      if (!action) {
+        const jobs = jobsForDelegation(id);
+        if (!jobs.length) return ctx.ui.notify(`Unknown durable delegation ${id}`, "warning");
+        return ctx.ui.notify(`${id}\n${jobs.map(job => `${job.delegate?.agent ?? job.agent ?? job.id}: ${job.status}`).join("\n")}\nActions: ${actionNames.join(", ")}`, "info");
+      }
+      const selected = delegationActions.get(action);
+      if (!selected || flags.length > 1 || (flags.length && (!['brief', 'review', 'audit'].includes(action) || flags[0] !== '--refresh'))) return ctx.ui.notify(usage, "warning");
+      return selected.handler([id, ...flags].join(" "), ctx);
     },
   });
 

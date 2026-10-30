@@ -238,7 +238,7 @@ def test_team_room_command_cancels_active_agent(tmp_path):
         proc.stdin.write(json.dumps({"id": "work", "type": "prompt", "message": "@raven hang forever"}) + "\n")
         proc.stdin.flush()
         time.sleep(0.3)
-        proc.stdin.write(json.dumps({"id": "stop", "type": "prompt", "message": "/team-stop"}) + "\n")
+        proc.stdin.write(json.dumps({"id": "stop", "type": "prompt", "message": "/pipal:team stop"}) + "\n")
         proc.stdin.flush()
         transcript = Path(json.loads(runtime_file.read_text())["transcript_file"])
         deadline = time.time() + 8

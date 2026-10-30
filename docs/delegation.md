@@ -72,25 +72,25 @@ Visible foreground work is the default. It keeps tool activity transparent and i
 Sasha, have Ada do this in the background.
 ```
 
-Use `/delegations` to list background jobs. When every participant finishes, Pipal records the result and shows one durable passive notice; it does not start an agent turn automatically. The owner can then ask the primary to review the delegation, call `pipal_delegation_status`, request corrections when needed, and report one synthesized outcome. Background mode is never selected silently for important work.
+Use `/pipal:delegations` to list background jobs. `/pipal:delegation <dg-id>` shows status and available actions without starting a model turn. When every participant finishes, Pipal records the result and shows one durable passive notice; it does not start an agent turn automatically. The owner can then ask the primary to review the delegation, call `pipal_delegation_status`, request corrections when needed, and report one synthesized outcome. Background mode is never selected silently for important work.
 
 Visibility is independent from execution:
 
-- `/watch <dg-id>` replays and streams the delegation's agent messages and tool activity.
-- `/join <dg-id>` watches and lets the owner send `@agent:<name>` or `@team` follow-up interventions.
-- `/detach` stops displaying activity without cancelling work.
+- `/pipal:delegation <dg-id> watch` replays and streams the delegation's agent messages and tool activity.
+- `/pipal:delegation <dg-id> join` watches and lets the owner send `@agent:<name>` or `@team` follow-up interventions.
+- `/pipal:detach` stops displaying activity without cancelling work.
 
 An intervention sent while an isolated background turn is already running is treated as a persistent follow-up rather than mutating that in-flight model call.
 
 ## Durable delegation reports
 
-Pipal provides three disclosure levels after a delegation finishes:
+Pipal provides three disclosure levels after a delegation finishes. These report on delegated work, not the current conversation; `/pipal:summary` is the separate conversational shortcut:
 
 | Command | Report | Contract |
 |---|---|---|
-| `/brief <dg-id>` | Executive Summary | Decision, key evidence, material uncertainty, next actions |
-| `/review <dg-id>` | Decision Review | Individual contributions, exact conclusions, provenance, manager treatment, disagreements, decision derivation |
-| `/audit <dg-id>` | Audit Report | Complete evidence, source mapping, corrections, judgment trail, confidence, and unresolved uncertainty |
+| `/pipal:delegation <dg-id> brief` | Executive Summary | Decision, key evidence, material uncertainty, next actions |
+| `/pipal:delegation <dg-id> review` | Decision Review | Individual contributions, exact conclusions, provenance, manager treatment, disagreements, decision derivation |
+| `/pipal:delegation <dg-id> audit` | Audit Report | Complete evidence, source mapping, corrections, judgment trail, confidence, and unresolved uncertainty |
 
 Each command validates the delegation and loads every participant result. The accountable primary agent must distinguish participant claims from verified facts and cannot claim independent verification unless its session contains the corresponding evidence.
 
@@ -145,7 +145,8 @@ The transcript is the durable direct/delegation thread. The delegate's native Pi
 - Native Pi cancellation applies to `pipal_delegate` tool calls.
 - Agent turns time out after five minutes by default.
 - Repeated delegation calls are bounded per primary turn.
-- `/delegations` lists durable background jobs and groups team members under one delegation id.
-- `/cancel-delegation <dg-id>` terminates all active workers in that delegation.
-- `/brief`, `/review`, and `/audit` create or open durable reports at increasing levels of detail; `--refresh` regenerates one.
-- `/watch`, `/join`, and `/detach` control visibility without changing execution.
+- `/pipal:delegations` lists durable background jobs and groups team members under one delegation id.
+- `/pipal:delegation <dg-id> cancel` terminates all active workers in that delegation.
+- `/pipal:delegation <dg-id> brief|review|audit` creates or opens a durable report; `--refresh` explicitly regenerates it.
+- The `watch` and `join` delegation actions, and `/pipal:detach`, control visibility without changing execution.
+- Old unnamespaced Pipal command names are no longer registered. Native Pi commands remain unchanged.

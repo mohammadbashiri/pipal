@@ -60,7 +60,7 @@ Run these steps before creating a release tag:
    - `uv build`
    - install the wheel into a brand-new virtual environment
    - run `pip check` and `pipal --help`
-7. Exercise delegation/reporting: direct message, foreground delegation, background `/watch`/`/join`/`/detach`, and `/brief`/`/review`/`/audit`; verify the primary reviews participant results before reporting.
+7. Exercise delegation/reporting: direct message, foreground delegation, background `/pipal:delegation <id> watch|join` and `/pipal:detach`, and `/pipal:delegation <id> brief|review|audit`; verify the primary reviews participant results before reporting.
 8. Confirm local-first safety wording, unsandboxed host-permission boundaries, plaintext config handling, provider cost/privacy guidance, and that Docker is explicitly experimental (unless target Docker behavior is CI-tested).
 9. Update compatibility matrix in this file with tested versions.
 10. Add release notes summary (highlights + any behavior changes).
