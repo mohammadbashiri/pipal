@@ -12,7 +12,6 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .llm_config import load_llm_config
 from .registry import list_agents as registry_list_agents, get_agent
 from .server_config import ServerSettings
 from .server_context import (
@@ -269,14 +268,11 @@ def create_app(
                     return
                 session_path = candidate
 
-            llm_config = load_llm_config(agent.path)
-
             client = PiRpcClient(
                 settings=settings,
                 agent_dir=agent.path,
                 topic_name=topic_name,
                 session_file=session_path,
-                llm_config=llm_config,
                 read_only_tools=read_only_tools,
             )
             await client.start()

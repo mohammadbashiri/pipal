@@ -8,7 +8,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .llm_config import load_llm_config
 from .registry import get_agent
 from .runner import run_agent_print
 
@@ -84,10 +83,8 @@ def run_clickclack_bridge(config_path: Path) -> None:
                         if author == target["bot_user_id"]:
                             continue
                         text, history = _context_packet(base, target["token"], event["channel_id"], event["payload"]["message_id"])
-                        agent, llm = get_agent(target["agent"]), None
-                        if agent:
-                            llm = load_llm_config(agent["path"])
-                        if not agent or not llm:
+                        agent = get_agent(target["agent"])
+                        if not agent:
                             _reply(base, target["token"], event["channel_id"], "I cannot start: this mapped Pipal agent is unavailable.")
                             continue
                         prompt = f"""You are @{target['handle']}, responding in a ClickClack channel.
@@ -102,7 +99,7 @@ Reply directly and concisely. Do not claim to have read context not included abo
                         turn_id = event["payload"]["message_id"]
                         _typing(base, target["token"], workspace, event["channel_id"], turn_id, True)
                         try:
-                            answer = run_agent_print(agent["path"], llm, prompt).strip()
+                            answer = run_agent_print(agent["path"], {}, prompt).strip()
                             _reply(base, target["token"], event["channel_id"], answer or "I could not produce a response.")
                         finally:
                             _typing(base, target["token"], workspace, event["channel_id"], turn_id, False)

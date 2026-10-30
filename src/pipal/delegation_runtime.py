@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 from .conversation_runtime import session_for_cwd
-from .llm_config import load_llm_config
 from .registry import list_agents
 from .runner import _find_native_pi, load_persona
 from .team_storage import latest_jsonl, list_teams
@@ -64,10 +63,6 @@ def build_delegation_runtime(
         if not name or name == primary_name:
             continue
         agent_path = Path(registered_path).resolve()
-        llm = load_llm_config(str(agent_path))
-        if not llm:
-            continue
-
         delegate_dir = root / name
         sessions_dir = delegate_dir / "sessions"
         transcript_file = delegate_dir / "transcript.jsonl"
@@ -93,8 +88,6 @@ def build_delegation_runtime(
                 "agent": name,
                 "role": "Pipal agent",
                 "agent_path": str(agent_path),
-                "provider": llm.get("provider"),
-                "model": llm.get("model"),
                 "prompt_file": str(prompt_file.resolve()),
                 "session_file": str(session.resolve()),
                 "transcript_file": str(transcript_file.resolve()),
@@ -115,7 +108,9 @@ def build_delegation_runtime(
                 "members": members,
             })
 
-    selected_llm = primary_llm if primary_llm is not None else (load_llm_config(str(primary_home)) or {})
+    # Only explicit launch overrides may be inherited by job-scoped workers.
+    # Registered-agent homes do not own model defaults.
+    selected_llm = primary_llm or {}
     runtime = {
         "schema_version": 2,
         "default_provider": selected_llm.get("provider"),

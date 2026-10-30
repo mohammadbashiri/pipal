@@ -270,7 +270,12 @@ def _run_agent_cmd(
 
 
 def run_agent(agent_path: str, llm_config: dict, extra_args: list[str]):
-    """Invoke pi with persona context, passing through any extra CLI args."""
+    """Invoke Pi using its defaults or saved session model and explicit CLI flags.
+
+    The legacy llm_config argument is accepted for caller compatibility, but
+    interactive launches must not override Pi with agent-specific defaults.
+    """
+    llm_config = {}
     # Extract Pipal flags before passing the rest to pi.
     topic_name, extra_args = _extract_topic_name(extra_args)
     no_session = "--no-session" in extra_args

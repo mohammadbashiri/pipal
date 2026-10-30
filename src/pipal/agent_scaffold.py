@@ -1,4 +1,3 @@
-import json
 import importlib.resources
 from datetime import datetime
 from pathlib import Path
@@ -68,8 +67,3 @@ def ensure_agent_scaffold(
         type_path = p / ".pipal_type"
         if not type_path.exists():
             type_path.write_text(f"{agent_type}\n", encoding="utf-8")
-
-def write_llm_json(agent_path: str, provider: str, model: str):
-    p = Path(agent_path) / "llm.json"
-    p.write_text(json.dumps({"provider": provider, "model": model}, indent=2) + "\n", encoding="utf-8")
-    return str(p)

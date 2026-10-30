@@ -35,13 +35,13 @@ Critical or external actions still require the owner's normal approval.
 
 ## Temporary model choice for a registered agent
 
-`pipal_delegate` accepts optional `model` and `provider` on a **new** delegation. The provider defaults to the registered agent's configured provider. This starts a separate job-scoped native session with the agent's persona and the selected model; its corrections keep the same model when addressed by `delegation_id`. The agent's `llm.json` and normal delegation session remain unchanged. Do not pass a new model on a follow-up: start a new delegation for another model. Existing approval rules still apply to costly models and parallel work.
+`pipal_delegate` accepts optional `model` and `provider` on a **new** delegation. Without an explicit override, Pi selects the provider/model; registered agents have no model defaults. This starts a separate job-scoped native session with the agent's persona and the selected model; its corrections keep the same model when addressed by `delegation_id`. Pi's defaults and the normal delegation session remain unchanged. Do not pass a new model on a follow-up: start a new delegation for another model. Existing approval rules still apply to costly models and parallel work.
 
-For an interactive primary-agent TUI, `pipal agent chat <name> --model <model>` (optionally `--provider <provider>`) already passes a one-session override to Pi; it does not modify the saved `llm.json`. For example, `pipal agent chat momolty --model gpt-5.6-terra --topic research`.
+For an interactive primary-agent TUI, `pipal agent chat <name> --model <model>` (optionally `--provider <provider>`) already passes a one-session override to Pi; it does not modify Pi's defaults. For example, `pipal agent chat momolty --model gpt-5.6-terra --topic research`.
 
 ## Job-scoped (ephemeral) workers
 
-For a bounded task that needs a fresh perspective or a particular provider/model, use `pipal_delegate_ephemeral`. Unlike `pipal_delegate`, this does **not** add an agent to the registry or reuse a permanent persona or model setting. The primary supplies a `message` and may specify `role`, `provider`, `model`, `instructions`, and `acceptance_criteria`. Omitted provider/model inherit the primary chat's startup selection (including CLI overrides); role defaults to General assistant and instructions to evidence-based work. A different provider requires an explicit model. If the chat has no configured provider/model, supply both. Pi's separate `subagent` tool is **not** Pipal delegation:
+For a bounded task that needs a fresh perspective or a particular provider/model, use `pipal_delegate_ephemeral`. Unlike `pipal_delegate`, this does **not** add an agent to the registry or reuse a permanent persona or model setting. The primary supplies a `message` and may specify `role`, `provider`, `model`, `instructions`, and `acceptance_criteria`. Omitted provider/model inherit only an explicit primary-launch override, if present; otherwise Pi selects its defaults. A model-only override lets Pi resolve the provider. Role defaults to General assistant and instructions to evidence-based work. A different provider requires an explicit model. Pi's separate `subagent` tool is **not** Pipal delegation:
 
 ```text
 Have a one-off reviewer on my configured provider/model check this change,

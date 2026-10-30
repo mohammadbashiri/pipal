@@ -6,7 +6,7 @@ This is an early vertical slice. It proves visible multi-agent conversation insi
 
 ## Create a team
 
-Every member must already be a registered Pipal agent with an `llm.json`.
+Every member must already be a registered Pipal agent. Pi owns model defaults and authentication; no agent-specific model file is needed. Explicit provider/model fields on a team member remain per-team overrides.
 
 ```bash
 pipal team create mo-life-inc \

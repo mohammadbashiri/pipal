@@ -29,7 +29,7 @@ Non-goals (current):
 │  │  POLICY.md    - behavioral rules       │  │
 │  │  USER.md      - human's profile        │  │
 │  │  MEMORY.md    - durable notes          │  │
-│  │  llm.json     - provider + model       │  │
+│  │  topics/      - persisted context     │  │
 │  │  topics/      - persistent topic data   │  │
 │  │    X/sessions - native pi JSONL files   │  │
 │  └────────────────────────────────────────┘  │
@@ -48,7 +48,7 @@ When you run `pipal agent chat momo`, pipal:
 2. Reads all core markdown files and concatenates them into a system prompt
 3. Selects the requested Pipal topic (`main` by default)
 4. Creates a native pi session file inside that topic
-5. Launches `pi` with `--append-system-prompt` and the agent's provider/model from `llm.json`
+5. Launches `pi` with `--append-system-prompt`; Pi owns model defaults and authentication, with explicit per-launch overrides passed through
 
 The agent's personality, memory, and rules are injected as context — pi handles the actual LLM interaction, tool execution, and session recording.
 
@@ -147,16 +147,9 @@ Security note:
 
 ## LLM configuration
 
-Each agent has an `llm.json`:
+Pi owns default model selection and provider authentication. Pipal agents own identity, memory, and persistence, not model defaults. Legacy `llm.json` and `llm.local.json` files are not read or rewritten.
 
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-opus-4-6"
-}
-```
-
-An optional `llm.local.json` can override settings (deep-merged). Provider and model are passed to pi via `--provider` and `--model`.
+Explicit per-launch, delegation, or team-member overrides are passed to Pi via `--provider` and/or `--model`. Without an override, these flags are omitted. Existing delegation records and native sessions retain historical model provenance. Topic summaries likewise use Pi defaults unless given an explicit override or `PIPAL_SUMMARY_PROVIDER` / `PIPAL_SUMMARY_MODEL`.
 
 ## Registry
 

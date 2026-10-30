@@ -180,19 +180,13 @@ def _resolve_summary_model(llm_config: dict[str, Any]) -> tuple[str | None, str 
     return provider, model
 
 
-def _run_pi_summary(prompt: str, provider: str, model: str) -> str | None:
-    pi_bin = _find_native_pi()
-    cmd = [
-        pi_bin,
-        "--provider",
-        provider,
-        "--model",
-        model,
-        "--no-extensions",
-        "--no-session",
-        "-p",
-        prompt,
-    ]
+def _run_pi_summary(prompt: str, provider: str | None, model: str | None) -> str | None:
+    cmd = [_find_native_pi()]
+    if provider:
+        cmd += ["--provider", provider]
+    if model:
+        cmd += ["--model", model]
+    cmd += ["--no-extensions", "--no-session", "-p", prompt]
     result = subprocess.run(
         cmd,
         check=False,
@@ -207,7 +201,7 @@ def _run_pi_summary(prompt: str, provider: str, model: str) -> str | None:
     return output
 
 
-def summarize_topic(agent_path: Path, topic_name: str | None, llm_config: dict[str, Any]) -> SummaryResult:
+def summarize_topic(agent_path: Path, topic_name: str | None, llm_config: dict[str, Any] | None = None) -> SummaryResult:
     name = topic_name or "main"
     current_topic_dir = topic_dir(agent_path, name)
     sessions_dir = topic_sessions_dir(agent_path, name)
@@ -235,14 +229,12 @@ def summarize_topic(agent_path: Path, topic_name: str | None, llm_config: dict[s
         _log_summary_event(summary_path, "Summarize skipped (no new compacted sessions)")
         return SummaryResult("SKIP", "No new compacted sessions", summary_path)
 
-    provider, model = _resolve_summary_model(llm_config)
-    if not provider or not model:
-        _log_summary_event(summary_path, "Summarize skipped (missing provider/model)")
-        return SummaryResult("SKIP", "Missing provider/model", summary_path)
+    # This mapping is an explicit per-work override, never an agent default.
+    provider, model = _resolve_summary_model(llm_config or {})
 
     _log_summary_event(
         summary_path,
-        f"Summarize start model={provider}/{model} sessions={len(pending)}",
+        f"Summarize start model={provider or 'Pi default'}/{model or 'Pi default'} sessions={len(pending)}",
     )
 
     appended = 0

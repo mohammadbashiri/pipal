@@ -18,11 +18,6 @@ def test_build_delegation_runtime_creates_persistent_threads(tmp_path, monkeypat
     )
     monkeypatch.setattr(
         delegation_runtime,
-        "load_llm_config",
-        lambda path: {"provider": "test", "model": f"model-{Path(path).name}"},
-    )
-    monkeypatch.setattr(
-        delegation_runtime,
         "load_persona",
         lambda path: f"Persona for {Path(path).name}",
     )
@@ -52,6 +47,9 @@ def test_build_delegation_runtime_creates_persistent_threads(tmp_path, monkeypat
 
     assert runtime_file.is_file()
     assert runtime["primary"] == "sasha"
+    assert runtime["default_provider"] is None
+    assert runtime["default_model"] is None
+    assert all("provider" not in item and "model" not in item for item in runtime["delegates"])
     assert runtime["working_dir"] == str(cwd)
     assert [item["agent"] for item in runtime["delegates"]] == ["ada", "raven"]
     assert runtime["teams"] == [{

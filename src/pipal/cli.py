@@ -1,10 +1,9 @@
 import argparse, json, shutil, sys, subprocess
 from pathlib import Path
 from rich import print
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Confirm
 from .registry import add_agent, rm_agent, list_agents, get_agent, migrate_registry, pipal_dir, registry_path
-from .llm_config import load_llm_config
-from .agent_scaffold import ensure_agent_scaffold, write_llm_json
+from .agent_scaffold import ensure_agent_scaffold
 from .runner import run_agent, run_agent_print
 from .team_runner import run_team_chat
 from .team_storage import create_team, list_teams, load_team, remove_team, team_dir
@@ -56,16 +55,6 @@ def build_parser():
     p_create.add_argument("path", nargs="?", default=None)
     p_create.add_argument("--type", default="default", help="Agent type (default: default)")
     p_create.add_argument("--kb", dest="kb_path", default=None, help="Knowledge base path (kbchat only)")
-    p_create.add_argument(
-        "--provider",
-        default=None,
-        help="LLM provider (noninteractive; requires --model; omit both for interactive setup)",
-    )
-    p_create.add_argument(
-        "--model",
-        default=None,
-        help="LLM model (noninteractive; requires --provider; omit both for interactive setup)",
-    )
 
     p_remove = sub2.add_parser("remove", help="Remove an agent")
     p_remove.add_argument("name")
@@ -74,18 +63,12 @@ def build_parser():
 
     p_chat = sub2.add_parser("chat", help="Chat with an agent (interactive TUI); pass --model [and --provider] after the name to override for this session")
     p_chat.add_argument("name")
-    p_chat.add_argument("args", nargs=argparse.REMAINDER, help="Pi flags, e.g. --model gpt-5.6-terra; saved llm.json is unchanged")
+    p_chat.add_argument("args", nargs=argparse.REMAINDER, help="Pi flags, e.g. --model gpt-5.6-terra; otherwise use Pi defaults")
 
     p_ask = sub2.add_parser("ask", help="Ask an agent (one-shot prompt)")
     p_ask.add_argument("name")
     p_ask.add_argument("--print", action="store_true", dest="print_only")
     p_ask.add_argument("prompt", nargs=argparse.REMAINDER)
-
-    p_set = sub2.add_parser("set-llm", help="Set agent llm.json")
-    p_set.add_argument("name")
-    p_set.add_argument("spec", nargs="?", default=None, help='Either "provider:model" or omit to use flags')
-    p_set.add_argument("--provider", default=None)
-    p_set.add_argument("--model", default=None)
 
     # ── team subcommands ──
     pteam = sub.add_parser("team", help="Create and chat with human-owned AI teams")
@@ -225,17 +208,6 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
 
     args = build_parser().parse_args(argv)
-
-    # Validate before registry migration so an incomplete noninteractive request
-    # cannot create or migrate registry files.
-    if (
-        args.cmd == "agent"
-        and args.agent_cmd == "create"
-        and bool(args.provider) != bool(args.model)
-    ):
-        print("[red]--provider and --model must be supplied together.[/red]")
-        print("Omit both flags for interactive model selection.")
-        return 2
 
     if migrate_registry():
         print("[green]Migrated[/green] agent registry to ~/.pipal/agents.json")
@@ -386,12 +358,7 @@ def main(argv=None):
             return 2
 
         if args.topic_cmd == "summarize":
-            llm = load_llm_config(agent["path"])
-            if not llm:
-                print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pipal agent set-llm {args.agent} "provider:model"')
-                return 2
-            result = summarize_topic(Path(agent["path"]), topic_name, llm)
+            result = summarize_topic(Path(agent["path"]), topic_name, {})
             color = "green" if result.status == "OK" else "yellow"
             print(f"[{color}]{result.status}[/{color}] {result.message}")
             return 0 if result.status in {"OK", "SKIP"} else 2
@@ -446,11 +413,7 @@ def main(argv=None):
             return 0
 
         if args.session_cmd == "open":
-            llm = load_llm_config(agent["path"])
-            if not llm:
-                print("[yellow]No llm.json found[/yellow]")
-                return 2
-            run_agent(agent["path"], llm, ["--topic", args.topic, "--session", str(session_file)])
+            run_agent(agent["path"], {}, ["--topic", args.topic, "--session", str(session_file)])
             return 0
 
         if args.session_cmd == "remove":
@@ -515,9 +478,6 @@ def main(argv=None):
             path = str(path_obj)
             path_existed = path_obj.exists()
             before_paths = set(path_obj.rglob("*")) if path_existed and path_obj.is_dir() else set()
-            llm_path = path_obj / "llm.json"
-            llm_existed = llm_path.is_file()
-            llm_before = llm_path.read_bytes() if llm_existed else None
             reg_file = registry_path()
             registry_before = reg_file.read_bytes() if reg_file.exists() else None
             try:
@@ -539,28 +499,11 @@ def main(argv=None):
                     agent_type=args.type if args.type != "default" else None,
                 )
 
-                if args.provider and args.model:
-                    written = write_llm_json(path, args.provider, args.model)
-                    print(f"[green]LLM[/green] provider={args.provider} model={args.model}")
-                elif _interactive_set_llm(path, args.name):
-                    return 0
-                else:
-                    print("[red]Model selection required.[/red]")
-                    print("Run `pi` and complete /login, then try again.")
-                    raise ValueError("Model selection required")
                 return 0
             except Exception as exc:
                 current_paths = set(path_obj.rglob("*")) if path_obj.exists() else set()
                 _rollback_agent_creation(path_obj, registry_before, path_existed, current_paths - before_paths)
-                if llm_existed:
-                    llm_path.write_bytes(llm_before)
-                elif llm_path.is_file() or llm_path.is_symlink():
-                    try:
-                        llm_path.unlink()
-                    except FileNotFoundError:
-                        pass
-                if str(exc) != "Model selection required":
-                    print(f"[red]Agent creation failed; rolled back:[/red] {exc}")
+                print(f"[red]Agent creation failed; rolled back:[/red] {exc}")
                 return 2
 
         if args.agent_cmd == "remove":
@@ -591,15 +534,9 @@ def main(argv=None):
                 print(f"[red]Unknown agent[/red] {args.name}. Run: pipal agent list")
                 return 2
 
-            llm = load_llm_config(a["path"])
-            if not llm:
-                print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pipal agent set-llm {args.name} "provider:model"')
-                return 2
-
             extra_args = args.args or []
             try:
-                run_agent(a["path"], llm, extra_args)
+                run_agent(a["path"], {}, extra_args)
             except ValueError as exc:
                 print(f"[red]{exc}[/red]")
                 return 2
@@ -609,12 +546,6 @@ def main(argv=None):
             a = get_agent(args.name)
             if not a:
                 print(f"[red]Unknown agent[/red] {args.name}. Run: pipal agent list")
-                return 2
-
-            llm = load_llm_config(a["path"])
-            if not llm:
-                print("[yellow]No llm.json found. Run:[/yellow]")
-                print(f'  pipal agent set-llm {args.name} "provider:model"')
                 return 2
 
             prompt = args.prompt or []
@@ -628,43 +559,16 @@ def main(argv=None):
                 return 2
 
             if print_only:
-                response = run_agent_print(a["path"], llm, " ".join(prompt))
+                response = run_agent_print(a["path"], {}, " ".join(prompt))
                 if response:
                     print(response)
                 return 0
 
             try:
-                run_agent(a["path"], llm, prompt)
+                run_agent(a["path"], {}, prompt)
             except ValueError as exc:
                 print(f"[red]{exc}[/red]")
                 return 2
-            return 0
-        
-        if args.agent_cmd == "set-llm":
-            a = get_agent(args.name)
-            if not a:
-                print(f"[red]Unknown agent[/red] {args.name}. Run: pipal agent list")
-                return 2
-
-            provider = args.provider
-            model = args.model
-
-            if args.spec:
-                try:
-                    provider, model = parse_llm_spec(args.spec)
-                except Exception as e:
-                    print(f"[red]{e}[/red]")
-                    return 2
-
-            if not provider or not model:
-                if _interactive_set_llm(a["path"], args.name):
-                    return 0
-                print("[red]Model selection required.[/red]")
-                return 2
-
-            written = write_llm_json(a["path"], provider, model)
-            print(f"[green]Updated[/green] {written}")
-            print(f"[cyan]LLM[/cyan] provider={provider} model={model}")
             return 0
 
     print("[yellow]Tip:[/yellow] use `pipal agent ...`")
@@ -678,95 +582,3 @@ def parse_team_member_spec(spec: str) -> tuple[str, str]:
     if not agent or not role:
         raise ValueError('Invalid member. Expected "agent:role".')
     return agent, role
-
-
-def parse_llm_spec(spec: str):
-    if not spec or ":" not in spec:
-        raise ValueError('Invalid spec. Expected "provider:model".')
-    provider, model = spec.split(":", 1)
-    provider, model = provider.strip(), model.strip()
-    if not provider or not model:
-        raise ValueError('Invalid spec. Expected "provider:model".')
-    return provider, model
-
-
-def _interactive_set_llm(agent_path: str, name: str) -> bool:
-    """Interactive model selection. Returns True if llm.json written."""
-    try:
-        result = subprocess.run(
-            ["pi", "--list-models"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        print("[red]pi not found.[/red] Install with: npm install -g @earendil-works/pi-coding-agent")
-        return False
-
-    if result.returncode != 0 or not result.stdout:
-        print("[yellow]No models available.[/yellow] Run `pi` and complete /login, then try again.")
-        return False
-
-    lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
-    if len(lines) < 2:
-        return False
-
-    rows = []
-    for line in lines[1:]:
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        provider, model = parts[0], parts[1]
-        rows.append((provider, model))
-
-    if not rows:
-        return False
-
-    providers = sorted({p for p, _ in rows})
-    print("\n[bold]Select provider[/bold]")
-    for i, p in enumerate(providers, 1):
-        print(f"  {i}. {p}")
-
-    while True:
-        provider_choice = Prompt.ask("Provider").strip()
-        if not provider_choice:
-            print("[red]Provider is required[/red]")
-            continue
-        if provider_choice.isdigit():
-            idx = int(provider_choice) - 1
-            if idx < 0 or idx >= len(providers):
-                print("[red]Invalid provider selection[/red]")
-                continue
-            provider = providers[idx]
-            break
-        if provider_choice in providers:
-            provider = provider_choice
-            break
-        print("[red]Unknown provider[/red]")
-
-    models = [m for p, m in rows if p == provider]
-    print(f"\n[bold]Select model[/bold] ({provider})")
-    for i, m in enumerate(models, 1):
-        print(f"  {i}. {m}")
-
-    while True:
-        model_choice = Prompt.ask("Model").strip()
-        if not model_choice:
-            print("[red]Model is required[/red]")
-            continue
-        if model_choice.isdigit():
-            idx = int(model_choice) - 1
-            if idx < 0 or idx >= len(models):
-                print("[red]Invalid model selection[/red]")
-                continue
-            model = models[idx]
-            break
-        if model_choice in models:
-            model = model_choice
-            break
-        print("[red]Unknown model[/red]")
-
-    written = write_llm_json(agent_path, provider, model)
-    print(f"[green]Updated[/green] {written}")
-    print(f"[cyan]LLM[/cyan] provider={provider} model={model}")
-    return True

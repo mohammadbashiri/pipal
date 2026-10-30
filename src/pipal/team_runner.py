@@ -10,7 +10,6 @@ from .conversation_runtime import (
     session_cwd as _session_cwd,
     session_for_cwd as _session_for_cwd,
 )
-from .llm_config import load_llm_config
 from .registry import get_agent
 from .runner import _find_native_pi, load_persona
 from .team_storage import latest_jsonl, team_topic_dir
@@ -157,10 +156,6 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
         agent = get_agent(member["agent"])
         if not agent:
             raise ValueError(f"Unknown team agent: {member['agent']}")
-        llm = load_llm_config(agent["path"])
-        if not llm:
-            raise ValueError(f"Agent {member['agent']} has no llm.json")
-
         agent_path = Path(agent["path"])
         member_sessions = current_topic / "members" / member["agent"] / "sessions"
         member_session = None if new_session else latest_jsonl(member_sessions)
@@ -183,8 +178,6 @@ def build_team_runtime(team: dict, topic_name: str, *, new_session: bool = False
             {
                 **member,
                 "agent_path": str(agent_path.resolve()),
-                "provider": llm.get("provider"),
-                "model": llm.get("model"),
                 "prompt_file": str(prompt_file.resolve()),
                 "session_file": str(member_session.resolve()),
             }

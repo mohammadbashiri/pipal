@@ -368,8 +368,8 @@ interface EphemeralRecord {
   topic: string;
   role: string;
   instructions: string;
-  provider: string;
-  model: string;
+  provider?: string;
+  model?: string;
   created_at: string;
   closed_at?: string;
   session_file?: string;
@@ -566,7 +566,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
   if (runtime.delegates.length > 0) pi.registerTool({
     name: "pipal_delegate",
     label: "Delegate to Pipal agent",
-    description: `Hold a persistent delegation thread with a registered Pipal agent. Available: ${available}. For a new delegation, optionally select a temporary model/provider without changing the agent's saved settings; follow-ups keep that choice. Use repeated calls to review, correct, and finish delegated work.`,
+    description: `Hold a persistent delegation thread with a registered Pipal agent. Available: ${available}. For a new delegation, optionally select a temporary model/provider without changing Pi's defaults; follow-ups keep that choice. Use repeated calls to review, correct, and finish delegated work.`,
     promptSnippet: "Delegate outcome-oriented work to a persistent Pipal agent",
     promptGuidelines: [
       "You own every delegated outcome. Frame the goal, context, and acceptance criteria instead of relaying the user's words.",
@@ -588,8 +588,8 @@ export default function delegationExtension(pi: ExtensionAPI) {
         Type.Literal("background"),
       ], { description: "Foreground by default; background only when explicitly requested" })),
       delegation_id: Type.Optional(Type.String({ description: "Existing delegation id when continuing or correcting the same managed outcome" })),
-      model: Type.Optional(Type.String({ description: "Optional model override for a NEW delegation; does not change the agent's saved model" })),
-      provider: Type.Optional(Type.String({ description: "Optional provider override for a NEW delegation; requires model; defaults to the agent's provider" })),
+      model: Type.Optional(Type.String({ description: "Optional model override for a NEW delegation; applies only to this delegation" })),
+      provider: Type.Optional(Type.String({ description: "Optional provider override for a NEW delegation; requires model; otherwise Pi resolves the provider" })),
     }),
     renderShell: "self",
     async execute(_id, params, signal, onUpdate) {
@@ -613,7 +613,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
         const basePrompt = fs.readFileSync(delegate.prompt_file, "utf8");
         fs.writeFileSync(`${dir}/prompt.md`, basePrompt.replaceAll(delegate.transcript_file, transcript) + "\nThis model choice applies only to this delegation, not the agent's saved settings.\n", { mode: 0o600 });
         scoped = { delegation_id: delegationId, agent: delegate.agent, primary: runtime.primary, topic: runtime.topic,
-          provider: params.provider?.trim() || delegate.provider || "", model: params.model.trim(), created_at: new Date().toISOString() };
+          provider: params.provider?.trim() || "", model: params.model.trim(), created_at: new Date().toISOString() };
         saveModelOverride(runtime, scoped);
       }
       if (scoped) {
@@ -690,19 +690,19 @@ export default function delegationExtension(pi: ExtensionAPI) {
   if (runtime.ephemeral_root) pi.registerTool({
     name: "pipal_delegate_ephemeral",
     label: "Delegate to one-off worker",
-    description: "Pipal's job-scoped ephemeral worker (not Pi's separate subagent tool). Start a bounded worker without registering an agent, or follow up with delegation_id. A new worker defaults to the primary chat's startup provider/model, a general role, and evidence-based instructions if omitted. Its session and transcript remain durable. Prefer registered agents for ongoing roles. Never silently choose an expensive model or parallel workers.",
-    promptSnippet: "For one-off Pipal delegation use pipal_delegate_ephemeral (not Pi subagent); provider/model default to the primary chat's startup selection",
+    description: "Pipal's job-scoped ephemeral worker (not Pi's separate subagent tool). Start a bounded worker without registering an agent, or follow up with delegation_id. A new worker uses Pi's default model unless explicitly overridden for this job or primary launch, with a general role and evidence-based instructions if omitted. Its session and transcript remain durable. Prefer registered agents for ongoing roles. Never silently choose an expensive model or parallel workers.",
+    promptSnippet: "For one-off Pipal delegation use pipal_delegate_ephemeral (not Pi subagent); Pi owns model selection unless this job or primary launch explicitly overrides it",
     promptGuidelines: [
       "Use registered agents for ongoing roles; use this Pipal ephemeral worker for bounded independent work. Do not confuse it with Pi's separate subagent tool.",
-      "For a new worker, message alone is sufficient when the primary chat has a configured startup provider/model. Set role and instructions if the task needs a specific perspective; set provider/model only for an explicit alternative.",
+      "For a new worker, message alone is sufficient; Pi owns default model selection. Set role and instructions if the task needs a specific perspective; set provider/model only for an explicit alternative.",
       "Frame acceptance criteria, inspect and verify results, and follow up using delegation_id before closing the job.",
       "Do not silently choose a costly model or launch broad parallel work; follow the owner's approval boundaries.",
       "Background is the default for ephemeral workers; use foreground when explicitly requested. Return the delegation ID so the owner can continue chatting.",
     ],
     parameters: Type.Object({
       message: Type.String({ description: "Concrete task or next correction for this job" }),
-      provider: Type.Optional(Type.String({ description: "Provider for a NEW worker; defaults to the primary chat's startup provider. If changing provider, specify model too" })),
-      model: Type.Optional(Type.String({ description: "Model for a NEW worker; defaults to the primary chat's startup model" })),
+      provider: Type.Optional(Type.String({ description: "Explicit provider for a NEW worker; otherwise Pi selects it (or an explicit primary launch override is inherited)" })),
+      model: Type.Optional(Type.String({ description: "Explicit model for a NEW worker; otherwise Pi selects it (or an explicit primary launch override is inherited)" })),
       role: Type.Optional(Type.String({ description: "Short role label for a NEW worker; defaults to General assistant" })),
       instructions: Type.Optional(Type.String({ description: "Job-specific instructions for a NEW worker; defaults to independent, evidence-based work" })),
       acceptance_criteria: Type.Optional(Type.String()),
@@ -719,11 +719,10 @@ export default function delegationExtension(pi: ExtensionAPI) {
         record = ephemeralRecord(runtime, params.delegation_id);
       } else {
         const role = params.role?.trim() || "General assistant";
-        const provider = params.provider?.trim() || runtime.default_provider?.trim();
+        const provider = params.provider?.trim() || (params.model ? undefined : runtime.default_provider?.trim());
         const model = params.model?.trim() || runtime.default_model?.trim();
         const instructions = params.instructions?.trim() || "Work independently on the assigned task. Ground claims in evidence, respect the primary's constraints, and report blockers honestly.";
         if (params.provider && provider !== runtime.default_provider && !params.model?.trim()) throw new Error("Changing the provider requires a model for that provider");
-        if (!provider || !model) throw new Error("No default provider/model is configured for this session; specify both when creating the worker");
         if (!/^[\w -]{1,60}$/.test(role)) throw new Error("Role must be a short label (letters, numbers, spaces, hyphens)");
         let id: string;
         let dir: string;
@@ -750,7 +749,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
         const background = startBackgroundJob(runtime, delegate, params.message, params.acceptance_criteria, { delegationId: record.delegation_id });
         record.session_file = `${runtime.background_root}/${background.worker_job_id}/session.jsonl`;
         saveEphemeral(runtime, record);
-        return { content: [{ type: "text", text: `Background ephemeral delegation ${record.delegation_id} (${record.role}, ${record.provider}/${record.model}) started. Follow up using this delegation_id after completion.` }], details: background };
+        return { content: [{ type: "text", text: `Background ephemeral delegation ${record.delegation_id} (${record.role}, ${record.provider || "Pi default"}/${record.model || "Pi default"}) started. Follow up using this delegation_id after completion.` }], details: background };
       }
       appendEvent(delegate, { type: "message", author: runtime.primary, content: params.message, acceptance_criteria: params.acceptance_criteria, delegation_id: record.delegation_id, ephemeral: true });
       const result = await runQueued(delegate, runtime.primary, params.message, params.acceptance_criteria, signal, (partial) => {
@@ -761,7 +760,7 @@ export default function delegationExtension(pi: ExtensionAPI) {
       result.delegationId = record.delegation_id;
       appendEvent(delegate, { type: "message", author: delegate.agent, content: result.text || "(no response)", delegation_id: record.delegation_id, ephemeral: true });
       return {
-        content: [{ type: "text", text: `Ephemeral delegation ${record.delegation_id} (${record.role}, ${record.provider}/${record.model})\n\n${result.text || "(no response)"}` }],
+        content: [{ type: "text", text: `Ephemeral delegation ${record.delegation_id} (${record.role}, ${record.provider || "Pi default"}/${record.model || "Pi default"})\n\n${result.text || "(no response)"}` }],
         details: result,
         usage: { input: result.inputTokens, output: result.outputTokens, cacheRead: 0, cacheWrite: 0, totalTokens: result.inputTokens + result.outputTokens, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.cost } },
       };

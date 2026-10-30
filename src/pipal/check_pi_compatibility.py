@@ -12,7 +12,6 @@ from typing import Iterable
 from rich import print
 from rich.console import Console
 
-from .llm_config import load_llm_config
 from .registry import get_agent, list_agents
 from .runner import _find_native_pi
 from .server_config import ServerSettings
@@ -57,7 +56,7 @@ REMEDIATION = {
         "Your pi build must support `--mode rpc` for `pipal serve` WebSocket chat.",
     ],
     "rpc start": [
-        "Ensure at least one agent has `llm.json` (run `pipal agent set-llm <agent> \"provider:model\"`).",
+        "Register an agent and configure models/authentication in Pi.",
         "If provider auth is missing, open `pi` and complete `/login`.",
     ],
 }
@@ -146,15 +145,10 @@ def _select_agent(agent_name: str | None) -> tuple[str, str, dict] | None:
         agent = get_agent(agent_name)
         if not agent:
             return None
-        llm = load_llm_config(agent["path"])
-        if not llm:
-            return None
-        return agent["name"], agent["path"], llm
+        return agent["name"], agent["path"], {}
 
     for name, path in list_agents().items():
-        llm = load_llm_config(path)
-        if llm:
-            return name, path, llm
+        return name, path, {}
     return None
 
 
@@ -306,7 +300,7 @@ def run_doctor(agent_name: str | None = None) -> int:
             result = CheckResult(
                 "rpc start",
                 False,
-                "No agent with llm.json found. Run: pipal agent set-llm <agent> \"provider:model\"",
+                "No registered agent found. Register an agent before running the RPC check.",
             )
             results.append(result)
             log_result(result)

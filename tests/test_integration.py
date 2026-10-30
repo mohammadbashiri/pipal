@@ -9,7 +9,7 @@ import subprocess
 import pytest
 from pathlib import Path
 
-from pipal.agent_scaffold import ensure_agent_scaffold, write_llm_json
+from pipal.agent_scaffold import ensure_agent_scaffold
 from pipal.runner import (
     _build_pi_cmd,
     _find_native_pi,
@@ -199,6 +199,7 @@ class TestRunnerHelpers:
         paths = _extension_paths(None)
         assert any("auto_greet" in str(p) for p in paths)
         assert any("rolling_summary" in str(p) for p in paths)
+        assert not any("model_recovery" in str(p) for p in paths)
 
     def test_extension_paths_kbchat(self):
         paths = _extension_paths("kbchat")

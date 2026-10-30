@@ -27,9 +27,19 @@ A thin persistence layer on top of the [Pi coding agent](https://github.com/badl
 - persistent direct agent messaging and outcome-owned delegation
 - an optional local HTTP/WS server
 
-**Alpha / local-first:** pipal is designed for one person on one trusted machine. It is not a multi-tenant platform and is not hardened for the public internet. Agents run with the host user's permissions and are currently unsandboxed; treat prompts, tools, workspace files, transcripts, and reports as local data. Provider calls may incur usage charges, and `llm.json` stores the selected provider/model in plaintext (never put API keys in it). Review provider privacy, retention, and billing before delegating sensitive work.
+**Alpha / local-first:** pipal is designed for one person on one trusted machine. It is not a multi-tenant platform and is not hardened for the public internet. Agents run with the host user's permissions and are currently unsandboxed; treat prompts, tools, workspace files, transcripts, and reports as local data. Provider calls may incur usage charges, so review provider privacy, retention, and billing before delegating sensitive work.
 
 Largely prompted into existence and iterated through daily use.
+
+### Models belong to Pi
+
+Pipal adds identity, memory and persistence—not a second model/authentication layer. New chats use Pi's default model. Resuming a conversation lets Pi restore its saved model. Use Pi's `/model` and `/login` controls as usual, or pass an explicit launch override:
+
+```sh
+pipal agent chat my-agent --provider openai --model <model-id>
+```
+
+There are no agent-specific model defaults or `agent set-llm` command. Legacy `llm.json` / `llm.local.json` files no longer select an agent's model and need not be edited or migrated. Explicit per-work model overrides remain available where supported; Pipal does not silently change providers or retry failed messages.
 
 ## What pipal is not
 
